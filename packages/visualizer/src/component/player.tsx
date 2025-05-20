@@ -114,13 +114,16 @@ const downloadReport = (content: string): void => {
   a.click();
 };
 
-export function Player(props?: {
+export interface PlayerProps {
   replayScripts?: AnimationScript[];
   imageWidth?: number;
   imageHeight?: number;
   reportFileContent?: string | null;
   key?: string | number;
-}): JSX.Element {
+  disableZoom?: boolean;
+}
+
+export function Player(props?: PlayerProps): JSX.Element {
   const [titleText, setTitleText] = useState('');
   const [subTitleText, setSubTitleText] = useState('');
 
@@ -167,6 +170,8 @@ export function Player(props?: {
   }, []);
 
   const cameraState = useRef<CameraState>({ ...basicCameraState });
+
+  const disableZoom = props?.disableZoom ?? true;
 
   const repaintImage = async (): Promise<void> => {
     const imgToUpdate = currentImg.current;
@@ -292,20 +297,27 @@ export function Player(props?: {
 
   const updateCamera = (state: CameraState): void => {
     cameraState.current = state;
-
-    const newScale = Math.max(1, imageWidth / state.width);
-    windowContentContainer.scale.set(newScale);
-    windowContentContainer.x = Math.round(
-      canvasPaddingLeft - state.left * newScale,
-    );
-    windowContentContainer.y = Math.round(
-      canvasPaddingTop - state.top * newScale,
-    );
-
+    if (disableZoom !== false) {
+      // 禁用缩放和平移
+      const newScale = 1;
+      windowContentContainer.scale.set(newScale);
+      windowContentContainer.x = 0;
+      windowContentContainer.y = 0;
+    } else {
+      const newScale = Math.max(1, imageWidth / state.width);
+      windowContentContainer.scale.set(newScale);
+      windowContentContainer.x = Math.round(
+        canvasPaddingLeft - state.left * newScale,
+      );
+      windowContentContainer.y = Math.round(
+        canvasPaddingTop - state.top * newScale,
+      );
+    }
     const pointer = windowContentContainer.getChildByLabel('pointer');
     if (pointer) {
+      const newScale =
+        disableZoom !== false ? 1 : Math.max(1, imageWidth / state.width);
       pointer.scale.set(1 / newScale);
-
       if (
         typeof state.pointerLeft === 'number' &&
         typeof state.pointerTop === 'number'
@@ -321,6 +333,14 @@ export function Player(props?: {
     duration: number,
     frame: FrameFn,
   ): Promise<void> => {
+    if (disableZoom !== false) {
+      updateCamera({
+        ...cameraState.current,
+        ...targetState,
+        width: imageWidth,
+      });
+      return;
+    }
     const currentState = { ...cameraState.current };
     const startLeft = currentState.left;
     const startTop = currentState.top;
