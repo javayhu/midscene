@@ -1,26 +1,27 @@
 {
-	"name": "puppeteer-demo",
-	"private": true,
-	"version": "1.0.0",
-	"description": "> quick start",
-	"main": "index.js",
-	"type": "module",
-	"scripts": {
-		"test": "tsx demo.ts",
-		"test-yaml": "tsx demo-run-yaml.ts",
-        "test-wechat": "tsx demo-run-wechat.ts",
-        "test-miniapp-meituan": "tsx demo-run-miniapp-meituan.ts",
-        "test-miniapp-shishe": "tsx demo-run-miniapp-shishe.ts",
-        "test-miniapp-sample": "tsx demo-run-miniapp-sample.ts"
-	},
-	"author": "",
-	"license": "MIT",
-	"dependencies": {
-		"@midscene/web": "workspace:*"
-	},
-	"devDependencies": {
-		"dotenv": "^16.4.5",
-		"puppeteer": "^24.0.0",
-		"tsx": "^4.19.1"
-	}
+  "name": "puppeteer-demo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "> quick start",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "tsx demo.ts",
+    "test-yaml": "tsx demo-run-yaml.ts",
+    "test-wechat": "tsx demo-run-wechat.ts",
+    "test-miniapp-meituan": "tsx demo-run-miniapp-meituan.ts",
+    "test-miniapp-xiechen": "tsx demo-run-miniapp-xiechen.ts",
+    "test-miniapp-shishe": "tsx demo-run-miniapp-shishe.ts",
+    "test-miniapp-sample": "tsx demo-run-miniapp-sample.ts"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@midscene/web": "workspace:*"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.5",
+    "puppeteer": "^24.0.0",
+    "tsx": "^4.19.1"
+  }
 }
