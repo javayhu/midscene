@@ -129,6 +129,8 @@ export function StandardPlayground({
 
     const activeAgent = getAgent();
     const thisRunningId = Date.now().toString();
+
+    const actionType = value.type;
     try {
       if (!activeAgent) {
         throw new Error('No agent found');
@@ -148,7 +150,7 @@ export function StandardPlayground({
         const uiContext = await activeAgent?.getUIContext();
         result = await requestPlaygroundServer(
           uiContext!,
-          value.type,
+          actionType,
           value.prompt,
           {
             requestId: thisRunningId,
@@ -156,15 +158,15 @@ export function StandardPlayground({
           },
         );
       } else {
-        if (value.type === 'aiAction') {
+        if (actionType === 'aiAction') {
           result.result = await activeAgent?.aiAction(value.prompt);
-        } else if (value.type === 'aiQuery') {
+        } else if (actionType === 'aiQuery') {
           result.result = await activeAgent?.aiQuery(value.prompt);
-        } else if (value.type === 'aiAssert') {
+        } else if (actionType === 'aiAssert') {
           result.result = await activeAgent?.aiAssert(value.prompt, undefined, {
             keepRawResponse: true,
           });
-        } else if (value.type === 'aiTap') {
+        } else if (actionType === 'aiTap') {
           result.result = await activeAgent?.aiTap(value.prompt, {
             deepThink,
           });
@@ -203,7 +205,7 @@ export function StandardPlayground({
     currentAgentRef.current = null;
     setResult(result);
     setLoading(false);
-    if (result?.dump) {
+    if (result?.dump && !['aiQuery', 'aiAssert'].includes(actionType)) {
       const info = allScriptsFromDump(result.dump);
       setReplayScriptsInfo(info);
       setReplayCounter((c) => c + 1);
@@ -258,6 +260,7 @@ export function StandardPlayground({
           loading={loading}
           onRun={handleRun}
           onStop={handleStop}
+          clearPromptAfterRun={false}
         />
       </div>
     </Form>
@@ -278,15 +281,29 @@ export function StandardPlayground({
         </Panel>
         <PanelResizeHandle className="panel-resize-handle" />
         <Panel>
-          <PlaygroundResultView
-            result={result}
-            loading={loading}
-            serverValid={serverValid}
-            serviceMode={serviceMode}
-            replayScriptsInfo={replayScriptsInfo}
-            replayCounter={replayCounter}
-            loadingProgressText={loadingProgressText}
-          />
+          <div
+            className="playground-result-view-container"
+            style={
+              result
+                ? {}
+                : {
+                    border: '1px solid #0000001f',
+                    borderRadius: '8px',
+                    height: '90vh',
+                    padding: '16px',
+                  }
+            }
+          >
+            <PlaygroundResultView
+              result={result}
+              loading={loading}
+              serverValid={serverValid}
+              serviceMode={serviceMode}
+              replayScriptsInfo={replayScriptsInfo}
+              replayCounter={replayCounter}
+              loadingProgressText={loadingProgressText}
+            />
+          </div>
         </Panel>
       </PanelGroup>
     </div>

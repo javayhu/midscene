@@ -8,7 +8,7 @@
     "Browser use",
     "Android use"
   ],
-  "version": "0.16.10",
+  "version": "0.25.1",
   "repository": "https://github.com/web-infra-dev/midscene",
   "homepage": "https://midscenejs.com/",
   "jsnext:source": "./src/index.ts",
@@ -54,6 +54,10 @@
       "types": "./dist/types/playwright-report.d.ts",
       "default": "./dist/lib/playwright-report.js"
     },
+    "./playwright-reporter": {
+      "types": "./dist/types/playwright-reporter.d.ts",
+      "default": "./dist/lib/playwright-reporter.js"
+    },
     "./playground": {
       "types": "./dist/types/playground.d.ts",
       "default": "./dist/lib/playground.js"
@@ -92,6 +96,7 @@
       ],
       "playwright": ["./dist/types/playwright.d.ts"],
       "playwright-report": ["./dist/types/playwright-report.d.ts"],
+      "playwright-reporter": ["./dist/types/playwright-reporter.d.ts"],
       "playground": ["./dist/types/playground.d.ts"],
       "midscene-playground": ["./dist/types/midscene-playground.d.ts"],
       "midscene-server": ["./dist/types/midscene-server.d.ts"],
@@ -112,13 +117,11 @@
     "dev:server": "npm run build && ./bin/midscene-playground",
     "build": "modern build -c ./modern.config.ts",
     "postbuild": "node scripts/check-exports.js",
-    "build:watch": "modern build -w -c ./modern.config.ts",
+    "build:watch": "modern build -w -c ./modern.config.ts --no-clear",
     "test": "vitest --run",
     "test:u": "vitest --run -u",
     "test:ai": "AI_TEST_TYPE=web npm run test",
-    "test:ai:temp": "MIDSCENE_CACHE=true BRIDGE_MODE=true vitest --run tests/ai/bridge/open-new-tab.test.ts",
-    "test:ai:bridge": "MIDSCENE_CACHE=true BRIDGE_MODE=true npm run test --inspect tests/ai/bridge/temp.test.ts",
-    "test:ai:cache": "MIDSCENE_CACHE=true npm run test",
+    "test:ai:cache": "MIDSCENE_CACHE=true npm run test:ai",
     "upgrade": "modern upgrade",
     "e2e": "playwright test --config=tests/playwright.config.ts",
     "e2e:report": "MIDSCENE_REPORT=true playwright test --config=tests/playwright.config.ts",
@@ -132,7 +135,7 @@
     "@midscene/shared": "workspace:*",
     "@xmldom/xmldom": "0.8.10",
     "cors": "2.8.5",
-    "dayjs": "1.11.11",
+    "dayjs": "^1.11.11",
     "devtools-protocol": "0.0.1380148",
     "dotenv": "16.4.5",
     "express": "^4.21.2",
@@ -142,6 +145,7 @@
     "js-sha256": "0.11.0",
     "js-yaml": "4.1.0",
     "openai": "4.81.0",
+    "semver": "7.5.2",
     "socket.io": "^4.8.1",
     "socket.io-client": "4.8.1"
   },
@@ -152,11 +156,13 @@
     "@types/cors": "2.8.12",
     "@types/express": "^4.17.21",
     "@types/fs-extra": "11.0.4",
+    "@types/http-server": "^0.12.4",
     "@types/js-yaml": "4.0.9",
     "@types/node": "^18.0.0",
+    "@types/semver": "7.7.0",
     "playwright": "1.44.1",
     "puppeteer": "24.2.0",
-    "typescript": "^5.8.2",
+    "typescript": "^5.8.3",
     "vitest": "3.0.5"
   },
   "peerDependencies": {

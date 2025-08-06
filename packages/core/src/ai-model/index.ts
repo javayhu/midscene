@@ -1,6 +1,21 @@
-export { callToGetJSONObject } from './service-caller/index';
+export {
+  callAiFnWithStringResponse,
+  callToGetJSONObject,
+  call as callAi,
+} from './service-caller/index';
 export { systemPromptToLocateElement } from './prompt/llm-locator';
-export { describeUserPage } from './prompt/util';
+export {
+  describeUserPage,
+  elementByPositionWithElementInfo,
+} from './prompt/util';
+export {
+  generatePlaywrightTest,
+  generatePlaywrightTestStream,
+} from './prompt/playwright-generator';
+export {
+  generateYamlTest,
+  generateYamlTestStream,
+} from './prompt/yaml-generator';
 
 export type { ChatCompletionMessageParam } from 'openai/resources';
 
@@ -12,5 +27,10 @@ export {
 } from './inspect';
 
 export { plan } from './llm-planning';
-export { callAiFn, adaptBboxToRect } from './common';
-export { vlmPlanning } from './ui-tars-planning';
+export {
+  callAiFn,
+  adaptBboxToRect,
+} from './common';
+export { vlmPlanning, resizeImageForUiTars } from './ui-tars-planning';
+
+export { AIActionType, type AIArgs } from './common';

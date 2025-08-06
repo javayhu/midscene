@@ -18,9 +18,7 @@ const basicTest = ['tests/unit-test/**/*.test.ts'];
 
 export default defineConfig({
   test: {
-    include: enableAiTest
-      ? ['tests/ai/**/**.test.ts', ...basicTest]
-      : basicTest,
+    include: enableAiTest ? ['tests/ai/**/**.test.ts'] : basicTest,
   },
   define: {
     __VERSION__: `'${version}'`,
@@ -29,5 +27,8 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, 'src'),
     },
+  },
+  ssr: {
+    external: ['@silvia-odwyer/photon'],
   },
 });

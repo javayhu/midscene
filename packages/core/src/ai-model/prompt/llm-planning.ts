@@ -25,21 +25,24 @@ Target: User will give you a screenshot, an instruction and some previous logs i
 
 Restriction:
 - Don't give extra actions or plans beyond the instruction. ONLY plan for what the instruction requires. For example, don't try to submit the form if the instruction is only to fill something.
-- Always give ONLY ONE action in \`log\` field (or null if no action should be done), instead of multiple actions. Supported actions are Tap, Hover, Input, KeyboardPress, Scroll${pageType === 'android' ? ', AndroidBackButton, AndroidHomeButton, AndroidRecentAppsButton.' : '.'}
+- Always give ONLY ONE action in \`log\` field (or null if no action should be done), instead of multiple actions. Supported actions are Tap, Hover, Input, KeyboardPress, Scroll${pageType === 'android' ? ', AndroidBackButton, AndroidHomeButton, AndroidRecentAppsButton, AndroidLongPress, AndroidPull.' : '.'}
 - Don't repeat actions in the previous logs.
 - Bbox is the bounding box of the element to be located. It's an array of 4 numbers, representing ${bboxDescription(vlMode)}.
 
 Supporting actions:
 - Tap: { type: "Tap", ${vlLocateParam} }
+- RightClick: { type: "RightClick", ${vlLocateParam} }
 - Hover: { type: "Hover", ${vlLocateParam} }
-- Input: { type: "Input", ${vlLocateParam}, param: { value: string } } // \`value\` is the final that should be filled in the input box. No matter what modifications are required, just provide the final value to replace the existing input value. 
+- Input: { type: "Input", ${vlLocateParam}, param: { value: string } } // Replace the input field with a new value. \`value\` is the final that should be filled in the input box. No matter what modifications are required, just provide the final value to replace the existing input value. Giving a blank string means clear the input field.
 - KeyboardPress: { type: "KeyboardPress", param: { value: string } }
 - Scroll: { type: "Scroll", ${vlLocateParam} | null, param: { direction: 'down'(default) | 'up' | 'right' | 'left', scrollType: 'once' (default) | 'untilBottom' | 'untilTop' | 'untilRight' | 'untilLeft', distance: null | number }} // locate is the element to scroll. If it's a page scroll, put \`null\` in the \`locate\` field.
 ${
   pageType === 'android'
     ? `- AndroidBackButton: { type: "AndroidBackButton", param: {} }
 - AndroidHomeButton: { type: "AndroidHomeButton", param: {} }
-- AndroidRecentAppsButton: { type: "AndroidRecentAppsButton", param: {} }`
+- AndroidRecentAppsButton: { type: "AndroidRecentAppsButton", param: {} }
+- AndroidLongPress: { type: "AndroidLongPress", param: { x: number, y: number, duration?: number } }
+- AndroidPull: { type: "AndroidPull", param: { direction: 'up' | 'down', startPoint?: { x: number, y: number }, distance?: number, duration?: number } } // Pull down to refresh (direction: 'down') or pull up to load more (direction: 'up')`
     : ''
 }
 
@@ -92,7 +95,7 @@ You are a versatile professional in software UI automation. Your outstanding con
 ## Workflow
 
 1. Receive the screenshot, element description of screenshot(if any), user's instruction and previous logs.
-2. Decompose the user's task into a sequence of actions, and place it in the \`actions\` field. There are different types of actions (Tap / Hover / Input / KeyboardPress / Scroll / FalsyConditionStatement / Sleep ${pageType === 'android' ? '/ AndroidBackButton / AndroidHomeButton / AndroidRecentAppsButton' : ''}). The "About the action" section below will give you more details.
+2. Decompose the user's task into a sequence of actions, and place it in the \`actions\` field. There are different types of actions (Tap / Hover / Input / KeyboardPress / Scroll / FalsyConditionStatement / Sleep ${pageType === 'android' ? '/ AndroidBackButton / AndroidHomeButton / AndroidRecentAppsButton / AndroidLongPress / AndroidPull' : ''}). The "About the action" section below will give you more details.
 3. Precisely locate the target element if it's already shown in the screenshot, put the location info in the \`locate\` field of the action.
 4. If some target elements is not shown in the screenshot, consider the user's instruction is not feasible on this page. Follow the next steps.
 5. Consider whether the user's instruction will be accomplished after all the actions
@@ -119,6 +122,8 @@ type LocateParam = {{
 
 Each action has a \`type\` and corresponding \`param\`. To be detailed:
 - type: 'Tap'
+  * {{ ${llmLocateParam} }}
+- type: 'RightClick'
   * {{ ${llmLocateParam} }}
 - type: 'Hover'
   * {{ ${llmLocateParam} }}
@@ -151,7 +156,11 @@ ${
 - type: 'AndroidHomeButton', trigger the system "home" operation on Android devices
   * {{ param: {{}} }}
 - type: 'AndroidRecentAppsButton', trigger the system "recent apps" operation on Android devices
-  * {{ param: {{}} }}`
+  * {{ param: {{}} }}
+- type: 'AndroidLongPress', trigger a long press on the screen at specified coordinates on Android devices
+  * {{ param: {{ x: number, y: number, duration?: number }} }}
+- type: 'AndroidPull', trigger pull down to refresh or pull up actions on Android devices
+  * {{ param: {{ direction: 'up' | 'down', startPoint?: {{ x: number, y: number }}, distance?: number, duration?: number }} }}`
     : ''
 }
 `;
@@ -275,7 +284,7 @@ export const planSchema: ResponseFormatJSONSchema = {
               type: {
                 type: 'string',
                 description:
-                  'Type of action, one of "Tap", "Hover" , "Input", "KeyboardPress", "Scroll", "ExpectedFalsyCondition", "Sleep", "AndroidBackButton", "AndroidHomeButton", "AndroidRecentAppsButton"',
+                  'Type of action, one of "Tap", "RightClick", "Hover" , "Input", "KeyboardPress", "Scroll", "ExpectedFalsyCondition", "Sleep", "AndroidBackButton", "AndroidHomeButton", "AndroidRecentAppsButton", "AndroidLongPress"',
               },
               param: {
                 anyOf: [

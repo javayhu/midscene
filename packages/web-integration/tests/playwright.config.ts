@@ -1,11 +1,6 @@
 import path from 'node:path';
-// import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 import dotenv from 'dotenv';
-
-// 添加这两行获取当前文件目录（ES 模块兼容方式）
-// const __filename = fileURLToPath(import.meta.url);
-// const __dirname = path.dirname(__filename);
 
 const MIDSCENE_REPORT = process.env.MIDSCENE_REPORT;
 
@@ -48,7 +43,7 @@ export default defineConfig({
     MIDSCENE_REPORT
       ? {
           name: 'report',
-          testDir: './ai/web/playwright-report-test',
+          testDir: './ai/web/playwright-reporter-test',
           use: { ...devices['Desktop Chrome'] },
         }
       : {
@@ -61,9 +56,9 @@ export default defineConfig({
     [process.env.CI ? 'line' : 'list'],
     // [
     //   'json',
-    //   { outputFile: 'midscene_run/playwright-report/test-results.json' },
+    //   { outputFile: 'midscene_run/playwright-reporter/test-results.json' },
     // ],
-    // ['html', { outputFolder: 'midscene_run/playwright-report' }],
-    ['../src/playwright/reporter/index.ts'],
+    // ['html', { outputFolder: 'midscene_run/playwright-reporter' }],
+    ['../src/playwright/reporter/index.ts'], // separate/merged
   ],
 });

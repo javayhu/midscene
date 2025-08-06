@@ -1,12 +1,25 @@
-import type { PlanningActionParamScroll } from './types';
+import type { PlanningActionParamScroll, Rect, TUserPrompt } from './types';
 
 export interface LocateOption {
-  prompt?: string;
   deepThink?: boolean; // only available in vl model
+  cacheable?: boolean; // user can set this param to false to disable the cache for a single agent api
+  xpath?: string; // only available in web
+}
+
+export interface InsightExtractOption {
+  domIncluded?: boolean | 'visible-only';
+  screenshotIncluded?: boolean;
+  returnThought?: boolean;
+}
+
+export interface ReferenceImage {
+  base64: string;
+  rect?: Rect;
 }
 
 export interface DetailedLocateParam extends LocateOption {
-  prompt: string;
+  prompt: TUserPrompt;
+  referenceImage?: ReferenceImage;
 }
 
 export interface scrollParam {
@@ -16,6 +29,7 @@ export interface scrollParam {
 }
 
 export interface MidsceneYamlScript {
+  // @deprecated
   target?: MidsceneYamlScriptWebEnv;
   web?: MidsceneYamlScriptWebEnv;
   android?: MidsceneYamlScriptAndroidEnv;
@@ -30,6 +44,7 @@ export interface MidsceneYamlTask {
 
 export interface MidsceneYamlScriptEnvBase {
   output?: string;
+  unstableLogContent?: boolean | string;
   aiActionContext?: string;
 }
 
@@ -73,33 +88,40 @@ export interface MidsceneYamlFlowItemAIAction {
   ai?: string; // this is the shortcut for aiAction
   aiAction?: string;
   aiActionProgressTips?: string[];
+  cacheable?: boolean;
 }
 
 export interface MidsceneYamlFlowItemAIAssert {
   aiAssert: string;
+  errorMessage?: string;
 }
 
-export interface MidsceneYamlFlowItemAIQuery {
+export interface MidsceneYamlFlowItemAIQuery extends InsightExtractOption {
   aiQuery: string;
   name?: string;
 }
 
-export interface MidsceneYamlFlowItemAINumber {
+export interface MidsceneYamlFlowItemAINumber extends InsightExtractOption {
   aiNumber: string;
   name?: string;
 }
 
-export interface MidsceneYamlFlowItemAINString {
+export interface MidsceneYamlFlowItemAIString extends InsightExtractOption {
   aiString: string;
   name?: string;
 }
 
-export interface MidsceneYamlFlowItemAIBoolean {
+export interface MidsceneYamlFlowItemAIAsk extends InsightExtractOption {
+  aiAsk: string;
+  name?: string;
+}
+
+export interface MidsceneYamlFlowItemAIBoolean extends InsightExtractOption {
   aiBoolean: string;
   name?: string;
 }
 
-export interface MidsceneYamlFlowItemAILocate {
+export interface MidsceneYamlFlowItemAILocate extends LocateOption {
   aiLocate: string;
   name?: string;
 }
@@ -110,28 +132,32 @@ export interface MidsceneYamlFlowItemAIWaitFor {
 }
 
 export interface MidsceneYamlFlowItemAITap extends LocateOption {
-  aiTap: string;
+  aiTap: TUserPrompt;
+}
+
+export interface MidsceneYamlFlowItemAIRightClick extends LocateOption {
+  aiRightClick: TUserPrompt;
 }
 
 export interface MidsceneYamlFlowItemAIHover extends LocateOption {
-  aiHover: string;
+  aiHover: TUserPrompt;
 }
 
 export interface MidsceneYamlFlowItemAIInput extends LocateOption {
   aiInput: string; // value to input
-  locate: string; // where to input
+  locate: TUserPrompt; // where to input
 }
 
 export interface MidsceneYamlFlowItemAIKeyboardPress extends LocateOption {
   aiKeyboardPress: string;
-  locate?: string; // where to press, optional
+  locate?: TUserPrompt; // where to press, optional
 }
 
 export interface MidsceneYamlFlowItemAIScroll
   extends LocateOption,
     PlanningActionParamScroll {
   aiScroll: null;
-  locate?: string; // which area to scroll, optional
+  locate?: TUserPrompt; // which area to scroll, optional
 }
 
 export interface MidsceneYamlFlowItemEvaluateJavaScript {
@@ -143,17 +169,24 @@ export interface MidsceneYamlFlowItemSleep {
   sleep: number;
 }
 
+export interface MidsceneYamlFlowItemLogScreenshot {
+  logScreenshot?: string; // optional, the title of the screenshot
+  content?: string;
+}
+
 export type MidsceneYamlFlowItem =
   | MidsceneYamlFlowItemAIAction
   | MidsceneYamlFlowItemAIAssert
   | MidsceneYamlFlowItemAIQuery
   | MidsceneYamlFlowItemAIWaitFor
   | MidsceneYamlFlowItemAITap
+  | MidsceneYamlFlowItemAIRightClick
   | MidsceneYamlFlowItemAIHover
   | MidsceneYamlFlowItemAIInput
   | MidsceneYamlFlowItemAIKeyboardPress
   | MidsceneYamlFlowItemAIScroll
-  | MidsceneYamlFlowItemSleep;
+  | MidsceneYamlFlowItemSleep
+  | MidsceneYamlFlowItemLogScreenshot;
 
 export interface FreeFn {
   name: string;
@@ -168,3 +201,33 @@ export interface ScriptPlayerTaskStatus extends MidsceneYamlTask {
 }
 
 export type ScriptPlayerStatusValue = 'init' | 'running' | 'done' | 'error';
+
+// Index YAML file types for batch execution
+export interface MidsceneYamlConfig {
+  concurrent?: number;
+  continueOnError?: boolean;
+  summary?: string;
+  shareBrowserContext?: boolean;
+  web?: MidsceneYamlScriptWebEnv;
+  android?: MidsceneYamlScriptAndroidEnv;
+  files: string[];
+  headed?: boolean;
+  keepWindow?: boolean;
+  dotenvOverride?: boolean;
+  dotenvDebug?: boolean;
+}
+
+export interface MidsceneYamlConfigOutput {
+  format?: 'json';
+  path?: string;
+}
+
+export interface MidsceneYamlConfigResult {
+  file: string;
+  success: boolean;
+  executed: boolean;
+  output?: string | null;
+  report?: string | null;
+  error?: string;
+  duration?: number;
+}

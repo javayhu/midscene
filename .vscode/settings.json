@@ -16,15 +16,27 @@
     "fkill",
     "httpbin",
     "iconfont",
+    "jsonrepair",
     "modelcontextprotocol",
     "openrouter",
     "qwen",
     "taobao",
     "targetcreated",
     "Volcengine",
+    "xpaths",
     "Yadb"
   ],
   "[jsonc]": {
     "editor.defaultFormatter": "biomejs.biome"
-  }
+  },
+  "[json]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[plaintext]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "nxConsole.generateAiAgentRules": true
 }

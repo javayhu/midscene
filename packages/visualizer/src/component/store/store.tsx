@@ -70,12 +70,13 @@ export const useEnvConfig = create<{
   configString: string;
   setConfig: (config: Record<string, string>) => void;
   loadConfig: (configString: string) => void;
+  syncFromStorage: () => void;
   forceSameTabNavigation: boolean;
   setForceSameTabNavigation: (forceSameTabNavigation: boolean) => void;
   deepThink: boolean;
   setDeepThink: (deepThink: boolean) => void;
-  popupTab: 'playground' | 'bridge';
-  setPopupTab: (tab: 'playground' | 'bridge') => void;
+  popupTab: 'playground' | 'bridge' | 'recorder';
+  setPopupTab: (tab: 'playground' | 'bridge' | 'recorder') => void;
 }>((set, get) => {
   const configString = getConfigStringFromLocalStorage();
   const config = parseConfig(configString);
@@ -104,6 +105,11 @@ export const useEnvConfig = create<{
       set({ config, configString });
       localStorage.setItem(CONFIG_KEY, configString);
     },
+    syncFromStorage: () => {
+      const latestConfigString = getConfigStringFromLocalStorage();
+      const latestConfig = parseConfig(latestConfigString);
+      set({ config: latestConfig, configString: latestConfigString });
+    },
     forceSameTabNavigation: savedForceSameTabNavigation,
     setForceSameTabNavigation: (forceSameTabNavigation: boolean) => {
       set({ forceSameTabNavigation });
@@ -118,7 +124,7 @@ export const useEnvConfig = create<{
       localStorage.setItem(DEEP_THINK_KEY, deepThink.toString());
     },
     popupTab: 'playground',
-    setPopupTab: (tab: 'playground' | 'bridge') => {
+    setPopupTab: (tab: 'playground' | 'bridge' | 'recorder') => {
       set({ popupTab: tab });
     },
   };

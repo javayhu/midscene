@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { PageAgent, PageAgentOpt } from '@/common/agent';
+import type { PageAgent, PageAgentOpt, WebPageAgentOpt } from '@/common/agent';
 import { replaceIllegalPathCharsAndSpace } from '@/common/utils';
 import { PlaywrightAgent } from '@/playwright/index';
 import type { AgentWaitForOpt } from '@midscene/core';
+import {
+  DEFAULT_WAIT_FOR_NAVIGATION_TIMEOUT,
+  DEFAULT_WAIT_FOR_NETWORK_IDLE_TIMEOUT,
+} from '@midscene/shared/constants';
 import { getDebug } from '@midscene/shared/logger';
 import { type TestInfo, type TestType, test } from '@playwright/test';
 import type { Page as OriginPlaywrightPage } from 'playwright';
@@ -25,11 +29,13 @@ const groupAndCaseForTest = (testInfo: TestInfo) => {
     taskTitle = 'unnamed';
     taskFile = 'unnamed';
   }
+
+  const taskTitleWithRetry = `${taskTitle}${testInfo.retry ? `(retry #${testInfo.retry})` : ''}`;
+
   return {
-    taskFile,
-    taskTitle: replaceIllegalPathCharsAndSpace(
-      `${taskTitle}${testInfo.retry ? `(retry #${testInfo.retry})` : ''}`,
-    ),
+    file: taskFile,
+    id: replaceIllegalPathCharsAndSpace(`${taskFile}(${taskTitle})`),
+    title: replaceIllegalPathCharsAndSpace(taskTitleWithRetry),
   };
 };
 
@@ -39,31 +45,46 @@ export const midsceneDumpAnnotationId = 'MIDSCENE_DUMP_ANNOTATION';
 export const PlaywrightAiFixture = (options?: {
   forceSameTabNavigation?: boolean;
   waitForNetworkIdleTimeout?: number;
+  waitForNavigationTimeout?: number;
 }) => {
-  const { forceSameTabNavigation = true, waitForNetworkIdleTimeout = 1000 } =
-    options ?? {};
+  const {
+    forceSameTabNavigation = true,
+    waitForNetworkIdleTimeout = DEFAULT_WAIT_FOR_NETWORK_IDLE_TIMEOUT,
+    waitForNavigationTimeout = DEFAULT_WAIT_FOR_NAVIGATION_TIMEOUT,
+  } = options ?? {};
   const pageAgentMap: Record<string, PageAgent> = {};
   const createOrReuseAgentForPage = (
     page: OriginPlaywrightPage,
     testInfo: TestInfo, // { testId: string; taskFile: string; taskTitle: string },
-    opts?: PageAgentOpt,
+    opts?: WebPageAgentOpt,
   ) => {
     let idForPage = (page as any)[midsceneAgentKeyId];
     if (!idForPage) {
       idForPage = randomUUID();
       (page as any)[midsceneAgentKeyId] = idForPage;
       const { testId } = testInfo;
-      const { taskFile, taskTitle } = groupAndCaseForTest(testInfo);
+      const { file, id, title } = groupAndCaseForTest(testInfo);
       pageAgentMap[idForPage] = new PlaywrightAgent(page, {
         testId: `playwright-${testId}-${idForPage}`,
         forceSameTabNavigation,
-        cacheId: `${taskFile}(${taskTitle})`,
-        groupName: taskTitle,
-        groupDescription: taskFile,
+        cacheId: id,
+        groupName: title,
+        groupDescription: file,
         generateReport: false, // we will generate it in the reporter
         ...opts,
       });
+
+      pageAgentMap[idForPage].onDumpUpdate = (dump: string) => {
+        updateDumpAnnotation(testInfo, dump);
+      };
+
+      page.on('close', () => {
+        debugPage('page closed');
+        pageAgentMap[idForPage].destroy();
+        delete pageAgentMap[idForPage];
+      });
     }
+
     return pageAgentMap[idForPage];
   };
 
@@ -79,16 +100,21 @@ export const PlaywrightAiFixture = (options?: {
       | 'aiKeyboardPress'
       | 'aiScroll'
       | 'aiTap'
+      | 'aiRightClick'
       | 'aiQuery'
       | 'aiAssert'
       | 'aiWaitFor'
       | 'aiLocate'
       | 'aiNumber'
       | 'aiString'
-      | 'aiBoolean';
+      | 'aiBoolean'
+      | 'aiAsk';
   }) {
     const { page, testInfo, use, aiActionType } = options;
-    const agent = createOrReuseAgentForPage(page, testInfo) as PlaywrightAgent;
+    const agent = createOrReuseAgentForPage(page, testInfo, {
+      waitForNavigationTimeout,
+      waitForNetworkIdleTimeout,
+    }) as PlaywrightAgent;
 
     await use(async (taskPrompt: string, ...args: any[]) => {
       return new Promise((resolve, reject) => {
@@ -119,7 +145,6 @@ export const PlaywrightAiFixture = (options?: {
         });
       });
     });
-    updateDumpAnnotation(testInfo, agent.dumpDataString());
   }
 
   const updateDumpAnnotation = (test: TestInfo, dump: string) => {
@@ -147,11 +172,11 @@ export const PlaywrightAiFixture = (options?: {
           propsPage?: OriginPlaywrightPage | undefined,
           opts?: PageAgentOpt,
         ) => {
-          const agent = createOrReuseAgentForPage(
-            propsPage || page,
-            testInfo,
-            opts,
-          );
+          const agent = createOrReuseAgentForPage(propsPage || page, testInfo, {
+            waitForNavigationTimeout,
+            waitForNetworkIdleTimeout,
+            ...opts,
+          });
           return agent;
         },
       );
@@ -190,6 +215,18 @@ export const PlaywrightAiFixture = (options?: {
         testInfo,
         use,
         aiActionType: 'aiTap',
+      });
+    },
+    aiRightClick: async (
+      { page }: { page: OriginPlaywrightPage },
+      use: any,
+      testInfo: TestInfo,
+    ) => {
+      await generateAiFunction({
+        page,
+        testInfo,
+        use,
+        aiActionType: 'aiRightClick',
       });
     },
     aiHover: async (
@@ -324,6 +361,18 @@ export const PlaywrightAiFixture = (options?: {
         aiActionType: 'aiBoolean',
       });
     },
+    aiAsk: async (
+      { page }: { page: OriginPlaywrightPage },
+      use: any,
+      testInfo: TestInfo,
+    ) => {
+      await generateAiFunction({
+        page,
+        testInfo,
+        use,
+        aiActionType: 'aiAsk',
+      });
+    },
   };
 };
 
@@ -334,6 +383,9 @@ export type PlayWrightAiFixtureType = {
   aiTap: (
     ...args: Parameters<PageAgent['aiTap']>
   ) => ReturnType<PageAgent['aiTap']>;
+  aiRightClick: (
+    ...args: Parameters<PageAgent['aiRightClick']>
+  ) => ReturnType<PageAgent['aiRightClick']>;
   aiHover: (
     ...args: Parameters<PageAgent['aiHover']>
   ) => ReturnType<PageAgent['aiHover']>;
@@ -365,4 +417,7 @@ export type PlayWrightAiFixtureType = {
   aiBoolean: (
     ...args: Parameters<PageAgent['aiBoolean']>
   ) => ReturnType<PageAgent['aiBoolean']>;
+  aiAsk: (
+    ...args: Parameters<PageAgent['aiAsk']>
+  ) => ReturnType<PageAgent['aiAsk']>;
 };

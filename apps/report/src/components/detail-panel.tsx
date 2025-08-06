@@ -1,16 +1,19 @@
 'use client';
 import './detail-panel.less';
 import { useExecutionDump } from '@/components/store';
-import { filterBase64Value, timeStr } from '@/utils';
 import {
   CameraOutlined,
   FileTextOutlined,
   ScheduleOutlined,
   VideoCameraOutlined,
 } from '@ant-design/icons';
-import type { ExecutionTaskPlanning } from '@midscene/core';
+import type {
+  ExecutionTaskInsightLocate,
+  ExecutionTaskPlanning,
+} from '@midscene/core';
+import { filterBase64Value, timeStr } from '@midscene/visualizer';
 import { Blackboard, Player } from '@midscene/visualizer';
-import { ConfigProvider, Segmented } from 'antd';
+import { Segmented } from 'antd';
 import { useEffect, useState } from 'react';
 import OpenInPlayground from './open-in-playground';
 
@@ -32,14 +35,13 @@ const VIEW_TYPE_JSON = 'json';
 
 const DetailPanel = (): JSX.Element => {
   const insightDump = useExecutionDump((store) => store.insightDump);
-  const dumpId = useExecutionDump((store) => store._insightDumpLoadId);
+  const _contextLoadId = useExecutionDump((store) => store._contextLoadId);
   const activeExecution = useExecutionDump((store) => store.activeExecution);
   const activeExecutionId = useExecutionDump(
     (store) => store._executionDumpLoadId,
   );
   const activeTask = useExecutionDump((store) => store.activeTask);
-  const blackboardViewAvailable =
-    Boolean(activeTask?.pageContext) && insightDump;
+  const blackboardViewAvailable = Boolean(activeTask?.pageContext);
   const [preferredViewType, setViewType] = useState(VIEW_TYPE_REPLAY);
   const animationScripts = useExecutionDump(
     (store) => store.activeExecutionAnimation,
@@ -87,13 +89,23 @@ const DetailPanel = (): JSX.Element => {
       </div>
     );
   } else if (viewType === VIEW_TYPE_BLACKBOARD) {
-    if (blackboardViewAvailable && insightDump) {
+    if (blackboardViewAvailable) {
+      let highlightElements;
+
+      if (insightDump?.matchedElement) {
+        highlightElements = insightDump?.matchedElement;
+      } else {
+        highlightElements = (activeTask as ExecutionTaskInsightLocate).output
+          ?.element // hit cache
+          ? [activeTask.output.element]
+          : [];
+      }
       content = (
         <Blackboard
           uiContext={activeTask.pageContext}
-          highlightElements={insightDump.matchedElement}
-          highlightRect={insightDump!.taskInfo?.searchArea}
-          key={`${dumpId}`}
+          highlightElements={highlightElements}
+          highlightRect={insightDump?.taskInfo?.searchArea}
+          key={`${_contextLoadId}`}
         />
       );
     } else {
@@ -179,28 +191,18 @@ const DetailPanel = (): JSX.Element => {
   return (
     <div className="detail-panel">
       <div className="view-switcher">
-        <ConfigProvider
-          theme={{
-            components: {
-              Segmented: {
-                itemSelectedBg: '#bfc4da50',
-                itemSelectedColor: '#000000',
-              },
-            },
+        <Segmented
+          shape="round"
+          options={options}
+          value={viewType}
+          onChange={(value: any) => {
+            setViewType(value);
           }}
-        >
-          <Segmented
-            options={options}
-            value={viewType}
-            onChange={(value: any) => {
-              setViewType(value);
-            }}
-          />
+        />
 
-          <OpenInPlayground
-            context={(activeTask as ExecutionTaskPlanning)?.pageContext}
-          />
-        </ConfigProvider>
+        <OpenInPlayground
+          context={(activeTask as ExecutionTaskPlanning)?.pageContext}
+        />
       </div>
       <div className="detail-content">{content}</div>
     </div>

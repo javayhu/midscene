@@ -2,6 +2,11 @@ import type {
   AIUsageInfo,
   BaseElement,
   ElementTreeNode,
+  MidsceneYamlFlowItem,
+  PlanningAction,
+  PlanningActionParamInputOrKeyPress,
+  PlanningActionParamScroll,
+  PlanningActionParamSleep,
   Rect,
   Size,
 } from '@/types';
@@ -12,8 +17,8 @@ import type {
   ChatCompletionUserMessageParam,
 } from 'openai/resources';
 import {
+  call,
   callToGetJSONObject,
-  checkAIConfig,
   getModelName,
 } from './service-caller/index';
 
@@ -26,7 +31,7 @@ import { getDebug } from '@midscene/shared/logger';
 
 export type AIArgs = [
   ChatCompletionSystemMessageParam,
-  ChatCompletionUserMessageParam,
+  ...ChatCompletionUserMessageParam[],
 ];
 
 export enum AIActionType {
@@ -34,17 +39,13 @@ export enum AIActionType {
   INSPECT_ELEMENT = 1,
   EXTRACT_DATA = 2,
   PLAN = 3,
+  DESCRIBE_ELEMENT = 4,
 }
 
 export async function callAiFn<T>(
   msgs: AIArgs,
   AIActionTypeValue: AIActionType,
 ): Promise<{ content: T; usage?: AIUsageInfo }> {
-  assert(
-    checkAIConfig(),
-    'Cannot find config for AI model service. If you are using a self-hosted model without validating the API key, please set `OPENAI_API_KEY` to any non-null value. https://midscenejs.com/model-provider.html',
-  );
-
   const { content, usage } = await callToGetJSONObject<T>(
     msgs,
     AIActionTypeValue,
@@ -97,7 +98,7 @@ export function adaptQwenBbox(
 }
 
 export function adaptDoubaoBbox(
-  bbox: number[] | string,
+  bbox: string[] | number[] | string,
   width: number,
   height: number,
 ): [number, number, number, number] {
@@ -127,42 +128,65 @@ export function adaptDoubaoBbox(
     bbox = bbox[0];
   }
 
-  if (bbox.length === 4 || bbox.length === 5) {
+  let bboxList: number[] = [];
+  if (Array.isArray(bbox) && typeof bbox[0] === 'string') {
+    bbox.forEach((item) => {
+      if (typeof item === 'string' && item.includes(',')) {
+        const [x, y] = item.split(',');
+        bboxList.push(Number(x.trim()), Number(y.trim()));
+      } else if (typeof item === 'string' && item.includes(' ')) {
+        const [x, y] = item.split(' ');
+        bboxList.push(Number(x.trim()), Number(y.trim()));
+      } else {
+        bboxList.push(Number(item));
+      }
+    });
+  } else {
+    bboxList = bbox as any;
+  }
+
+  if (bboxList.length === 4 || bboxList.length === 5) {
     return [
-      Math.round((bbox[0] * width) / 1000),
-      Math.round((bbox[1] * height) / 1000),
-      Math.round((bbox[2] * width) / 1000),
-      Math.round((bbox[3] * height) / 1000),
+      Math.round((bboxList[0] * width) / 1000),
+      Math.round((bboxList[1] * height) / 1000),
+      Math.round((bboxList[2] * width) / 1000),
+      Math.round((bboxList[3] * height) / 1000),
     ];
   }
 
   // treat the bbox as a center point
   if (
-    bbox.length === 6 ||
-    bbox.length === 2 ||
-    bbox.length === 3 ||
-    bbox.length === 7
+    bboxList.length === 6 ||
+    bboxList.length === 2 ||
+    bboxList.length === 3 ||
+    bboxList.length === 7
   ) {
     return [
-      Math.max(0, Math.round((bbox[0] * width) / 1000) - defaultBboxSize / 2),
-      Math.max(0, Math.round((bbox[1] * height) / 1000) - defaultBboxSize / 2),
+      Math.max(
+        0,
+        Math.round((bboxList[0] * width) / 1000) - defaultBboxSize / 2,
+      ),
+      Math.max(
+        0,
+        Math.round((bboxList[1] * height) / 1000) - defaultBboxSize / 2,
+      ),
       Math.min(
         width,
-        Math.round((bbox[0] * width) / 1000) + defaultBboxSize / 2,
+        Math.round((bboxList[0] * width) / 1000) + defaultBboxSize / 2,
       ),
       Math.min(
         height,
-        Math.round((bbox[1] * height) / 1000) + defaultBboxSize / 2,
+        Math.round((bboxList[1] * height) / 1000) + defaultBboxSize / 2,
       ),
     ];
   }
 
   if (bbox.length === 8) {
     return [
-      Math.round((bbox[0] * width) / 1000),
-      Math.round((bbox[1] * height) / 1000),
-      Math.round((bbox[4] * width) / 1000),
-      Math.round((bbox[5] * height) / 1000),
+      Math.round((bboxList[0] * width) / 1000),
+      Math.round((bboxList[1] * height) / 1000),
+      Math.round((bboxList[4] * width) / 1000),
+      Math.round((bboxList[5] * height) / 1000),
     ];
   }
 
@@ -253,7 +277,7 @@ export function mergeRects(rects: Rect[]) {
 
 // expand the search area to at least 300 x 300, or add a default padding
 export function expandSearchArea(rect: Rect, screenSize: Size) {
-  const minEdgeSize = 300;
+  const minEdgeSize = vlLocateMode() === 'doubao-vision' ? 500 : 300;
   const defaultPadding = 160;
 
   const paddingSizeHorizontal =
@@ -294,8 +318,84 @@ export async function markupImageForLLM(
 
   const imagePayload = await compositeElementInfoImg({
     inputImgBase64: screenshotBase64,
-    elementsPositionInfo: elementsPositionInfoWithoutText as any,
+    elementsPositionInfo: elementsPositionInfoWithoutText,
     size,
   });
   return imagePayload;
+}
+
+export function buildYamlFlowFromPlans(
+  plans: PlanningAction[],
+  sleep?: number,
+): MidsceneYamlFlowItem[] {
+  const flow: MidsceneYamlFlowItem[] = [];
+
+  for (const plan of plans) {
+    const type = plan.type;
+    const locate = plan.locate?.prompt!; // TODO: check if locate is null
+
+    if (type === 'Tap') {
+      flow.push({
+        aiTap: locate!,
+      });
+    } else if (type === 'Hover') {
+      flow.push({
+        aiHover: locate!,
+      });
+    } else if (type === 'Input') {
+      const param = plan.param as PlanningActionParamInputOrKeyPress;
+      flow.push({
+        aiInput: param.value,
+        locate,
+      });
+    } else if (type === 'KeyboardPress') {
+      const param = plan.param as PlanningActionParamInputOrKeyPress;
+      flow.push({
+        aiKeyboardPress: param.value,
+        locate,
+      });
+    } else if (type === 'Scroll') {
+      const param = plan.param as PlanningActionParamScroll;
+      flow.push({
+        aiScroll: null,
+        locate,
+        direction: param.direction,
+        scrollType: param.scrollType,
+        distance: param.distance,
+      });
+    } else if (type === 'Sleep') {
+      const param = plan.param as PlanningActionParamSleep;
+      flow.push({
+        sleep: param.timeMs,
+      });
+    } else if (
+      type === 'AndroidBackButton' ||
+      type === 'AndroidHomeButton' ||
+      type === 'AndroidRecentAppsButton' ||
+      type === 'AndroidLongPress' ||
+      type === 'AndroidPull'
+    ) {
+      // not implemented in yaml yet
+    } else if (
+      type === 'Error' ||
+      type === 'ExpectedFalsyCondition' ||
+      type === 'Assert' ||
+      type === 'AssertWithoutThrow' ||
+      type === 'Finished'
+    ) {
+      // do nothing
+    } else {
+      console.warn(
+        `Cannot convert action ${type} to yaml flow. This should be a bug of Midscene.`,
+      );
+    }
+  }
+
+  if (sleep) {
+    flow.push({
+      sleep: sleep,
+    });
+  }
+
+  return flow;
 }

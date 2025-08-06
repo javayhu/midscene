@@ -1,6 +1,11 @@
 import { sha256 } from 'js-sha256';
 
+declare const WorkerGlobalScope: any;
+
 export const ifInBrowser = typeof window !== 'undefined';
+export const ifInWorker = typeof WorkerGlobalScope !== 'undefined';
+export const ifInNode =
+  typeof process !== 'undefined' && process.versions?.node;
 
 export function uuid(): string {
   return Math.random().toString(36).substring(2, 15);
@@ -87,3 +92,30 @@ export function logMsg(...message: Parameters<typeof console.log>) {
     console.log(...message);
   }
 }
+
+export async function repeat(
+  times: number,
+  fn: (index: number) => Promise<void>,
+) {
+  for (let i = 0; i < times; i++) {
+    await fn(i);
+  }
+}
+
+const REGEXP_LT = /</g;
+const REGEXP_GT = />/g;
+const REGEXP_LT_ESCAPE = '__midscene_lt__';
+const REGEXP_GT_ESCAPE = '__midscene_gt__';
+
+export const escapeScriptTag = (html: string) => {
+  return html
+    .replace(REGEXP_LT, REGEXP_LT_ESCAPE)
+    .replace(REGEXP_GT, REGEXP_GT_ESCAPE);
+};
+
+export const antiEscapeScriptTag = (html: string) => {
+  const REGEXP_LT = new RegExp(REGEXP_LT_ESCAPE, 'g');
+  const REGEXP_GT = new RegExp(REGEXP_GT_ESCAPE, 'g');
+
+  return html.replace(REGEXP_LT, '<').replace(REGEXP_GT, '>');
+};

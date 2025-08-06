@@ -2,9 +2,12 @@ import { imageInfoOfBase64 } from '@/image/index';
 import type { BaseElement, ElementTreeNode, Size, UIContext } from '@/types';
 import { NodeType } from '@midscene/shared/constants';
 import { vlLocateMode } from '@midscene/shared/env';
-import { descriptionOfTree, treeToList } from '@midscene/shared/extractor';
+import {
+  descriptionOfTree,
+  generateElementByPosition,
+  treeToList,
+} from '@midscene/shared/extractor';
 import { assert } from '@midscene/shared/utils';
-import { generateHashId } from '@midscene/shared/utils';
 
 export function describeSize(size: Size) {
   return `${size.width} x ${size.height}`;
@@ -29,6 +32,7 @@ export function describeElement(
     )
     .join('\n');
 }
+export const distanceThreshold = 16;
 
 export function elementByPositionWithElementInfo(
   treeRoot: ElementTreeNode<BaseElement>,
@@ -36,7 +40,14 @@ export function elementByPositionWithElementInfo(
     x: number;
     y: number;
   },
+  options?: {
+    requireStrictDistance?: boolean;
+    filterPositionElements?: boolean;
+  },
 ) {
+  const requireStrictDistance = options?.requireStrictDistance ?? true;
+  const filterPositionElements = options?.filterPositionElements ?? false;
+
   assert(typeof position !== 'undefined', 'position is required for query');
 
   const matchingElements: BaseElement[] = [];
@@ -50,7 +61,15 @@ export function elementByPositionWithElementInfo(
         item.rect.top <= position.y &&
         position.y <= item.rect.top + item.rect.height
       ) {
-        matchingElements.push(item);
+        if (
+          !(
+            filterPositionElements &&
+            item.attributes?.nodeType === NodeType.POSITION
+          ) &&
+          item.isVisible
+        ) {
+          matchingElements.push(item);
+        }
       }
     }
 
@@ -77,10 +96,13 @@ export function elementByPositionWithElementInfo(
     position,
   );
 
-  return distanceToCenter <= distanceThreshold ? element : undefined;
+  if (requireStrictDistance) {
+    return distanceToCenter <= distanceThreshold ? element : undefined;
+  }
+
+  return element;
 }
 
-export const distanceThreshold = 16;
 export function distance(
   point1: { x: number; y: number },
   point2: { x: number; y: number },
@@ -111,6 +133,8 @@ export async function describeUserPage<
   opt?: {
     truncateTextLength?: number;
     filterNonTextContent?: boolean;
+    domIncluded?: boolean | 'visible-only';
+    visibleOnly?: boolean;
   },
 ) {
   const { screenshotBase64 } = context;
@@ -128,6 +152,13 @@ export async function describeUserPage<
   // dfs tree, save the id and element info
   const idElementMap: Record<string, ElementType> = {};
   const flatElements: ElementType[] = treeToList(treeRoot);
+
+  if (opt?.domIncluded === true && flatElements.length >= 5000) {
+    console.warn(
+      'The number of elements is too large, it may cause the prompt to be too long, please use domIncluded: "visible-only" to reduce the number of elements',
+    );
+  }
+
   flatElements.forEach((element) => {
     idElementMap[element.id] = element;
     if (typeof element.indexId !== 'undefined') {
@@ -135,17 +166,21 @@ export async function describeUserPage<
     }
   });
 
-  const contentTree = await descriptionOfTree(
-    treeRoot,
-    opt?.truncateTextLength,
-    opt?.filterNonTextContent,
-  );
+  let pageDescription = '';
+  const visibleOnly = opt?.visibleOnly ?? opt?.domIncluded === 'visible-only';
+  if (opt?.domIncluded || !vlLocateMode()) {
+    // non-vl mode must provide the page description
+    const contentTree = await descriptionOfTree(
+      treeRoot,
+      opt?.truncateTextLength,
+      opt?.filterNonTextContent,
+      visibleOnly,
+    );
 
-  // if match by position, don't need to provide the page description
-  const sizeDescription = describeSize({ width, height });
-  const pageDescription = vlLocateMode()
-    ? ''
-    : `The size of the page: ${sizeDescription} \n Some of the elements are marked with a rectangle in the screenshot, some are not. \n The page elements tree:\n${contentTree}`;
+    // if match by position, don't need to provide the page description
+    const sizeDescription = describeSize({ width, height });
+    pageDescription = `The size of the page: ${sizeDescription} \n The page elements tree:\n${contentTree}`;
+  }
 
   return {
     description: pageDescription,
@@ -158,31 +193,17 @@ export async function describeUserPage<
       position: { x: number; y: number },
       size: { width: number; height: number },
     ) {
-      // console.log('elementByPosition', { position, size });
       return elementByPositionWithElementInfo(treeRoot, position);
     },
     insertElementByPosition(position: { x: number; y: number }) {
-      const rect = {
-        left: Math.max(position.x - 4, 0),
-        top: Math.max(position.y - 4, 0),
-        width: 8,
-        height: 8,
-      };
-      const id = generateHashId(rect);
-      const element = {
-        id,
-        attributes: { nodeType: NodeType.POSITION },
-        rect,
-        content: '',
-        center: [position.x, position.y],
-      } as ElementType;
+      const element = generateElementByPosition(position) as ElementType;
 
       treeRoot.children.push({
         node: element,
         children: [],
       });
       flatElements.push(element);
-      idElementMap[id] = element;
+      idElementMap[element.id] = element;
       return element;
     },
     size: { width, height },

@@ -3,7 +3,10 @@ import { sleep } from '@midscene/core/utils';
 import { DEFAULT_WAIT_FOR_NAVIGATION_TIMEOUT } from '@midscene/shared/constants';
 import type { ElementInfo } from '@midscene/shared/extractor';
 import { treeToList } from '@midscene/shared/extractor';
-import { getExtraReturnLogic } from '@midscene/shared/fs';
+import {
+  getElementInfosScriptContent,
+  getExtraReturnLogic,
+} from '@midscene/shared/fs';
 import { getDebug } from '@midscene/shared/logger';
 import { assert } from '@midscene/shared/utils';
 import type { Page as PlaywrightPage } from 'playwright';
@@ -12,7 +15,7 @@ import type { WebKeyInput } from '../common/page';
 import type { AbstractPage } from '../page';
 import type { MouseButton } from '../page';
 
-const debugPage = getDebug('web:page');
+export const debugPage = getDebug('web:page');
 
 export class Page<
   AgentType extends 'puppeteer' | 'playwright',
@@ -56,7 +59,7 @@ export class Page<
     this.underlyingPage = underlyingPage;
     this.pageType = pageType;
     this.waitForNavigationTimeout =
-      opts?.waitForNavigationTimeout || DEFAULT_WAIT_FOR_NAVIGATION_TIMEOUT;
+      opts?.waitForNavigationTimeout ?? DEFAULT_WAIT_FOR_NAVIGATION_TIMEOUT;
   }
 
   async evaluateJavaScript<T = any>(script: string): Promise<T> {
@@ -64,6 +67,11 @@ export class Page<
   }
 
   async waitForNavigation() {
+    if (this.waitForNavigationTimeout === 0) {
+      debugPage('waitForNavigation timeout is 0, skip waiting');
+      return;
+    }
+
     // issue: https://github.com/puppeteer/puppeteer/issues/3323
     if (this.pageType === 'puppeteer' || this.pageType === 'playwright') {
       debugPage('waitForNavigation begin');
@@ -94,6 +102,30 @@ export class Page<
     return treeToList(tree);
   }
 
+  async getXpathsById(id: string) {
+    const elementInfosScriptContent = getElementInfosScriptContent();
+
+    return this.evaluateJavaScript(
+      `${elementInfosScriptContent}midscene_element_inspector.getXpathsById('${id}')`,
+    );
+  }
+
+  async getXpathsByPoint(point: Point, isOrderSensitive: boolean) {
+    const elementInfosScriptContent = getElementInfosScriptContent();
+
+    return this.evaluateJavaScript(
+      `${elementInfosScriptContent}midscene_element_inspector.getXpathsByPoint({left: ${point.left}, top: ${point.top}}, ${isOrderSensitive})`,
+    );
+  }
+
+  async getElementInfoByXpath(xpath: string) {
+    const elementInfosScriptContent = getElementInfosScriptContent();
+
+    return this.evaluateJavaScript(
+      `${elementInfosScriptContent}midscene_element_inspector.getElementInfoByXpath('${xpath}')`,
+    );
+  }
+
   async getElementsNodeTree() {
     // ref: packages/web-integration/src/playwright/ai-fixture.ts popup logic
     // During test execution, a new page might be opened through a connection, and the page remains confined to the same page instance.
@@ -101,7 +133,10 @@ export class Page<
     await this.waitForNavigation();
     const scripts = await getExtraReturnLogic(true);
     assert(scripts, 'scripts should be set before writing report in browser');
+    const startTime = Date.now();
     const captureElementSnapshot = await this.evaluate(scripts);
+    const endTime = Date.now();
+    debugPage(`getElementsNodeTree end, cost: ${endTime - startTime}ms`);
     return captureElementSnapshot as ElementTreeNode<ElementInfo>;
   }
 
@@ -122,6 +157,7 @@ export class Page<
     const imgType = 'jpeg';
     const quality = 90;
     await this.waitForNavigation();
+    const startTime = Date.now();
     debugPage('screenshotBase64 begin');
 
     let base64: string;
@@ -142,7 +178,8 @@ export class Page<
     } else {
       throw new Error('Unsupported page type for screenshot');
     }
-    debugPage('screenshotBase64 end');
+    const endTime = Date.now();
+    debugPage(`screenshotBase64 end, cost: ${endTime - startTime}ms`);
     return base64;
   }
 
@@ -243,6 +280,11 @@ export class Page<
       return;
     }
 
+    const backspace = async () => {
+      await sleep(100);
+      await this.keyboard.press([{ key: 'Backspace' }]);
+    };
+
     const isMac = process.platform === 'darwin';
     if (isMac) {
       if (this.pageType === 'puppeteer') {
@@ -250,20 +292,21 @@ export class Page<
         await this.mouse.click(element.center[0], element.center[1], {
           count: 3,
         });
-      } else {
-        await this.mouse.click(element.center[0], element.center[1]);
-        await this.underlyingPage.keyboard.down('Meta');
-        await this.underlyingPage.keyboard.press('a');
-        await this.underlyingPage.keyboard.up('Meta');
+        await backspace();
       }
+
+      await this.mouse.click(element.center[0], element.center[1]);
+      await this.underlyingPage.keyboard.down('Meta');
+      await this.underlyingPage.keyboard.press('a');
+      await this.underlyingPage.keyboard.up('Meta');
+      await backspace();
     } else {
       await this.mouse.click(element.center[0], element.center[1]);
       await this.underlyingPage.keyboard.down('Control');
       await this.underlyingPage.keyboard.press('a');
       await this.underlyingPage.keyboard.up('Control');
+      await backspace();
     }
-    await sleep(100);
-    await this.keyboard.press([{ key: 'Backspace' }]);
   }
 
   private everMoved = false;

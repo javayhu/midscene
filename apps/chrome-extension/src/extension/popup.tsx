@@ -1,42 +1,102 @@
 /// <reference types="chrome" />
-import { ApiOutlined, HomeOutlined, SendOutlined } from '@ant-design/icons';
+import {
+  ApiOutlined,
+  GithubOutlined,
+  MenuOutlined,
+  QuestionCircleOutlined,
+  SendOutlined,
+  VideoCameraOutlined,
+} from '@ant-design/icons';
 import {
   EnvConfig,
-  GithubStar,
-  Logo,
   globalThemeConfig,
   useEnvConfig,
 } from '@midscene/visualizer';
 import '@midscene/visualizer/index.css';
-import { ConfigProvider, Tabs } from 'antd';
-import { BrowserExtensionPlayground } from '../component/playground';
-import { getExtensionVersion } from '../utils';
+import { ConfigProvider, Dropdown, Typography } from 'antd';
+import { useEffect, useState } from 'react';
+import { BrowserExtensionPlayground } from '../components/playground';
 import Bridge from './bridge';
+import Recorder from './recorder';
 import './popup.less';
+import { OPENAI_API_KEY, overrideAIConfig } from '@midscene/shared/env';
 import {
   ChromeExtensionProxyPage,
   ChromeExtensionProxyPageAgent,
 } from '@midscene/web/chrome-extension';
-
 // remember to destroy the agent when the tab is destroyed: agent.page.destroy()
 const extensionAgentForTab = (forceSameTabNavigation = true) => {
   const page = new ChromeExtensionProxyPage(forceSameTabNavigation);
   return new ChromeExtensionProxyPageAgent(page);
 };
 
-declare const __SDK_VERSION__: string;
-
 export function PlaygroundPopup() {
-  const extensionVersion = getExtensionVersion();
-  const { popupTab, setPopupTab } = useEnvConfig();
+  const { setPopupTab } = useEnvConfig();
+  const [currentMode, setCurrentMode] = useState<
+    'playground' | 'bridge' | 'recorder'
+  >('playground');
 
-  const items = [
+  const { config, deepThink } = useEnvConfig();
+
+  // Override AI configuration
+  useEffect(() => {
+    console.log('Chrome Extension - Overriding AI config:', config);
+    console.log('OPENAI_API_KEY exists:', !!OPENAI_API_KEY);
+    overrideAIConfig(config);
+  }, [config]);
+
+  const menuItems = [
     {
       key: 'playground',
-      label: 'Playground',
       icon: <SendOutlined />,
-      children: (
-        <div className="popup-playground-container">
+      label: 'Playground',
+      onClick: () => {
+        setCurrentMode('playground');
+        setPopupTab('playground');
+      },
+    },
+    {
+      key: 'recorder',
+      label: 'Recorder (Preview)',
+      icon: <VideoCameraOutlined />,
+      onClick: () => {
+        setCurrentMode('recorder');
+        setPopupTab('recorder');
+      },
+    },
+    {
+      key: 'bridge',
+      icon: <ApiOutlined />,
+      label: 'Bridge Mode',
+      onClick: () => {
+        setCurrentMode('bridge');
+        setPopupTab('bridge');
+      },
+    },
+  ];
+
+  const renderContent = () => {
+    if (currentMode === 'bridge') {
+      return (
+        <div className="popup-content bridge-mode">
+          <div className="bridge-container">
+            <Bridge />
+          </div>
+        </div>
+      );
+    }
+    if (currentMode === 'recorder') {
+      return (
+        <div className="popup-content recorder-mode">
+          <Recorder />
+        </div>
+      );
+    }
+
+    return (
+      <div className="popup-content">
+        {/* Playground Component */}
+        <div className="playground-component">
           <BrowserExtensionPlayground
             getAgent={(forceSameTabNavigation?: boolean) => {
               return extensionAgentForTab(forceSameTabNavigation);
@@ -44,74 +104,51 @@ export function PlaygroundPopup() {
             showContextPreview={false}
           />
         </div>
-      ),
-    },
-    {
-      key: 'bridge',
-      label: 'Bridge Mode',
-      children: (
-        <div className="popup-bridge-container">
-          <Bridge />
-        </div>
-      ),
-      icon: <ApiOutlined />,
-    },
-  ];
+      </div>
+    );
+  };
 
   return (
     <ConfigProvider theme={globalThemeConfig()}>
       <div className="popup-wrapper">
-        <div className="popup-header">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '10px',
-            }}
-          >
-            <a
-              style={{
-                color: 'unset',
-              }}
-              href="https://midscenejs.com/"
-              target="_blank"
-              rel="noreferrer"
+        {/* top navigation bar */}
+        <div className="popup-nav">
+          <div className="nav-left">
+            <Dropdown
+              menu={{ items: menuItems }}
+              trigger={['click']}
+              placement="bottomLeft"
+              overlayClassName="mode-selector-dropdown"
             >
-              <HomeOutlined
-                style={{
-                  fontSize: '20px',
-                  cursor: 'pointer',
-                  textDecoration: 'none',
-                }}
-              />
-            </a>
-            <GithubStar />
-            <EnvConfig showTooltipWhenEmpty={popupTab === 'playground'} />
+              <MenuOutlined className="nav-icon menu-trigger" />
+            </Dropdown>
+            <span className="nav-title">
+              {currentMode === 'playground'
+                ? 'Playground'
+                : currentMode === 'recorder'
+                  ? 'Recorder'
+                  : 'Bridge Mode'}
+            </span>
           </div>
-          <p>
-            AI-Driven Browser Automation with Chrome Extensions, JavaScript, and
-            YAML Scripts.{' '}
-            <a href="https://midscenejs.com/" target="_blank" rel="noreferrer">
-              Learn more
-            </a>
-          </p>
-        </div>
-        <div className="tabs-container">
-          <Tabs
-            defaultActiveKey="playground"
-            activeKey={popupTab}
-            items={items}
-            onChange={(key) => setPopupTab(key as 'playground' | 'bridge')}
-          />
+          <div className="nav-right">
+            <Typography.Link
+              href="https://github.com/web-infra-dev/midscene"
+              target="_blank"
+            >
+              <GithubOutlined className="nav-icon" />
+            </Typography.Link>
+            <Typography.Link
+              href="https://midscenejs.com/quick-experience.html"
+              target="_blank"
+            >
+              <QuestionCircleOutlined className="nav-icon" />
+            </Typography.Link>
+            <EnvConfig showTooltipWhenEmpty={false} showModelName={false} />
+          </div>
         </div>
 
-        <div className="popup-footer">
-          <p>
-            Midscene.js Chrome Extension v{extensionVersion} (SDK v
-            {__SDK_VERSION__})
-          </p>
-        </div>
+        {/* main content area */}
+        {renderContent()}
       </div>
     </ConfigProvider>
   );

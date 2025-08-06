@@ -1,3 +1,6 @@
+import { NodeType } from '../constants';
+import { generateHashId } from '../utils';
+
 export function isFormElement(node: globalThis.Node) {
   return (
     node instanceof HTMLElement &&
@@ -12,6 +15,18 @@ export function isButtonElement(
   node: globalThis.Node,
 ): node is globalThis.HTMLButtonElement {
   return node instanceof HTMLElement && node.tagName.toLowerCase() === 'button';
+}
+
+export function isAElement(
+  node: globalThis.Node,
+): node is globalThis.HTMLButtonElement {
+  return node instanceof HTMLElement && node.tagName.toLowerCase() === 'a';
+}
+
+export function isSvgElement(
+  node: globalThis.Node,
+): node is globalThis.SVGSVGElement {
+  return node instanceof SVGElement;
 }
 
 export function isImgElement(
@@ -46,10 +61,27 @@ function isIconfont(node: globalThis.Node): boolean {
   return false;
 }
 
+export function isNotContainerElement(node: globalThis.Node) {
+  return (
+    isTextElement(node) ||
+    isIconfont(node) ||
+    isImgElement(node) ||
+    isButtonElement(node) ||
+    isAElement(node) ||
+    isFormElement(node)
+  );
+}
+
 export function isTextElement(
   node: globalThis.Node,
 ): node is globalThis.HTMLTextAreaElement {
-  return node.nodeName.toLowerCase() === '#text' && !isIconfont(node);
+  if (node instanceof Element) {
+    if (node?.childNodes?.length === 1 && node?.childNodes[0] instanceof Text) {
+      return true;
+    }
+  }
+
+  return node.nodeName?.toLowerCase?.() === '#text' && !isIconfont(node);
 }
 
 export function isContainerElement(
@@ -87,6 +119,7 @@ function includeBaseElement(node: globalThis.Node) {
     'select',
     'option',
     'img',
+    'a',
   ];
 
   for (const tagName of includeList) {
@@ -97,4 +130,23 @@ function includeBaseElement(node: globalThis.Node) {
   }
 
   return false;
+}
+
+export function generateElementByPosition(position: { x: number; y: number }) {
+  const rect = {
+    left: Math.max(position.x - 4, 0),
+    top: Math.max(position.y - 4, 0),
+    width: 8,
+    height: 8,
+  };
+  const id = generateHashId(rect);
+  const element = {
+    id,
+    attributes: { nodeType: NodeType.POSITION },
+    rect,
+    content: '',
+    center: [position.x, position.y],
+  };
+
+  return element;
 }

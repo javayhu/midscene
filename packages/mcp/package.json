@@ -1,6 +1,6 @@
 {
   "name": "@midscene/mcp",
-  "version": "0.16.10",
+  "version": "0.25.1",
   "type": "module",
   "exports": {
     ".": {
@@ -17,25 +17,28 @@
   "scripts": {
     "build": "rslib build",
     "dev": "rslib build --watch",
+    "build:watch": "npm run dev",
     "test": "vitest run",
     "inspect": "node scripts/inspect.mjs",
     "inspect2": "mcp-inspector node ./dist/test2.cjs"
   },
   "devDependencies": {
-    "@modelcontextprotocol/inspector": "0.9.0",
-    "@rslib/core": "^0.6.2",
+    "@modelcontextprotocol/inspector": "0.14.1",
+    "@rslib/core": "^0.8.0",
     "@types/node": "^18.0.0",
-    "typescript": "^5.8.2",
+    "typescript": "^5.8.3",
     "vitest": "3.0.5",
     "dotenv": "16.4.5",
     "@midscene/web": "workspace:*",
     "@midscene/report": "workspace:*",
     "@midscene/core": "workspace:*",
     "@midscene/shared": "workspace:*",
+    "@midscene/android": "workspace:*",
     "@modelcontextprotocol/sdk": "1.10.2",
     "zod": "3.24.3"
   },
   "dependencies": {
     "puppeteer": "24.2.0"
-  }
+  },
+  "license": "MIT"
 }

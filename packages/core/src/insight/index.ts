@@ -1,35 +1,50 @@
-import { callAiFn } from '@/ai-model/common';
-import { AiExtractElementInfo, AiLocateElement } from '@/ai-model/index';
+import {
+  AIActionType,
+  type AIArgs,
+  callAiFn,
+  expandSearchArea,
+} from '@/ai-model/common';
+import {
+  AiExtractElementInfo,
+  AiLocateElement,
+  callToGetJSONObject,
+} from '@/ai-model/index';
 import { AiAssert, AiLocateSection } from '@/ai-model/inspect';
+import { elementDescriberInstruction } from '@/ai-model/prompt/describe';
 import type {
+  AIDescribeElementResponse,
   AIElementResponse,
-  AISingleElementResponse,
   AIUsageInfo,
   BaseElement,
   DetailedLocateParam,
   DumpSubscriber,
   InsightAction,
   InsightAssertionResponse,
+  InsightExtractOption,
   InsightExtractParam,
   InsightOptions,
   InsightTaskInfo,
   LocateResult,
   PartialInsightDumpFromSDK,
   Rect,
+  TMultimodalPrompt,
+  TUserPrompt,
   UIContext,
 } from '@/types';
 import {
   MIDSCENE_FORCE_DEEP_THINK,
+  MIDSCENE_USE_QWEN_VL,
   getAIConfigInBoolean,
   vlLocateMode,
 } from '@midscene/shared/env';
+import { compositeElementInfoImg, cropByRect } from '@midscene/shared/img';
 import { getDebug } from '@midscene/shared/logger';
 import { assert } from '@midscene/shared/utils';
 import { emitInsightDump } from './utils';
 
 export interface LocateOpts {
+  context?: UIContext<BaseElement>;
   callAI?: typeof callAiFn<AIElementResponse>;
-  quickAnswer?: Partial<AISingleElementResponse>;
 }
 
 export type AnyValue<T> = {
@@ -78,10 +93,7 @@ export default class Insight<
   ): Promise<LocateResult> {
     const { callAI } = opt || {};
     const queryPrompt = typeof query === 'string' ? query : query.prompt;
-    assert(
-      queryPrompt || opt?.quickAnswer,
-      'query or quickAnswer is required for locate',
-    );
+    assert(queryPrompt, 'query is required for locate');
     const dumpSubscriber = this.onceDumpUpdatedFn;
     this.onceDumpUpdatedFn = undefined;
 
@@ -105,7 +117,7 @@ export default class Insight<
       searchAreaPrompt = undefined;
     }
 
-    const context = await this.contextRetrieverFn('locate');
+    const context = opt?.context || (await this.contextRetrieverFn('locate'));
 
     let searchArea: Rect | undefined = undefined;
     let searchAreaRawResponse: string | undefined = undefined;
@@ -130,14 +142,19 @@ export default class Insight<
     }
 
     const startTime = Date.now();
-    const { parseResult, rect, elementById, rawResponse, usage } =
-      await AiLocateElement({
-        callAI: callAI || this.aiVendorFn,
-        context,
-        targetElementDescription: queryPrompt,
-        quickAnswer: opt?.quickAnswer,
-        searchConfig: searchAreaResponse,
-      });
+    const {
+      parseResult,
+      rect,
+      elementById,
+      rawResponse,
+      usage,
+      isOrderSensitive,
+    } = await AiLocateElement({
+      callAI: callAI || this.aiVendorFn,
+      context,
+      targetElementDescription: queryPrompt,
+      searchConfig: searchAreaResponse,
+    });
 
     const timeCost = Date.now() - startTime;
     const taskInfo: InsightTaskInfo = {
@@ -161,7 +178,6 @@ export default class Insight<
       userQuery: {
         element: queryPrompt,
       },
-      quickAnswer: opt?.quickAnswer,
       matchedElement: [],
       matchedRect: rect,
       data: null,
@@ -173,7 +189,7 @@ export default class Insight<
     const elements: BaseElement[] = [];
     (parseResult.elements || []).forEach((item) => {
       if ('id' in item) {
-        const element = elementById(item.id);
+        const element = elementById(item?.id);
 
         if (!element) {
           console.warn(
@@ -209,6 +225,9 @@ export default class Insight<
           indexId: elements[0]!.indexId,
           center: elements[0]!.center,
           rect: elements[0]!.rect,
+          xpaths: elements[0]!.xpaths || [],
+          attributes: elements[0]!.attributes,
+          isOrderSensitive,
         },
         rect,
       };
@@ -219,13 +238,15 @@ export default class Insight<
     };
   }
 
-  async extract<T = any>(input: string): Promise<T>;
-  async extract<T extends Record<string, string>>(
-    input: T,
-  ): Promise<Record<keyof T, any>>;
-  async extract<T extends object>(input: Record<keyof T, string>): Promise<T>;
-
-  async extract<T>(dataDemand: InsightExtractParam): Promise<any> {
+  async extract<T>(
+    dataDemand: InsightExtractParam,
+    opt?: InsightExtractOption,
+    multimodalPrompt?: TMultimodalPrompt,
+  ): Promise<{
+    data: T;
+    thought?: string;
+    usage?: AIUsageInfo;
+  }> {
     assert(
       typeof dataDemand === 'object' || typeof dataDemand === 'string',
       `dataDemand should be object or string, but get ${typeof dataDemand}`,
@@ -239,6 +260,8 @@ export default class Insight<
     const { parseResult, usage } = await AiExtractElementInfo<T>({
       context,
       dataQuery: dataDemand,
+      multimodalPrompt,
+      extractOption: opt,
     });
 
     const timeCost = Date.now() - startTime;
@@ -264,7 +287,7 @@ export default class Insight<
       error: errorLog,
     };
 
-    const { data } = parseResult || {};
+    const { data, thought } = parseResult || {};
 
     // 4
     emitInsightDump(
@@ -281,17 +304,12 @@ export default class Insight<
 
     return {
       data,
+      thought,
       usage,
     };
   }
 
-  async assert(assertion: string): Promise<InsightAssertionResponse> {
-    if (typeof assertion !== 'string') {
-      throw new Error(
-        'This is the assert method for Midscene, the first argument should be a string. If you want to use the assert method from Node.js, please import it from the Node.js assert module.',
-      );
-    }
-
+  async assert(assertion: TUserPrompt): Promise<InsightAssertionResponse> {
     const dumpSubscriber = this.onceDumpUpdatedFn;
     this.onceDumpUpdatedFn = undefined;
 
@@ -329,5 +347,76 @@ export default class Insight<
       thought,
       usage: assertResult.usage,
     };
+  }
+  async describe(
+    target: Rect | [number, number],
+    opt?: {
+      deepThink?: boolean;
+    },
+  ): Promise<Pick<AIDescribeElementResponse, 'description'>> {
+    assert(target, 'target is required for insight.describe');
+    const context = await this.contextRetrieverFn('describe');
+    const { screenshotBase64, size } = context;
+    assert(screenshotBase64, 'screenshot is required for insight.describe');
+
+    const systemPrompt = elementDescriberInstruction();
+
+    // Convert [x,y] center point to Rect if needed
+    const defaultRectSize = 30;
+    const targetRect: Rect = Array.isArray(target)
+      ? {
+          left: Math.floor(target[0] - defaultRectSize / 2),
+          top: Math.floor(target[1] - defaultRectSize / 2),
+          width: defaultRectSize,
+          height: defaultRectSize,
+        }
+      : target;
+
+    let imagePayload = await compositeElementInfoImg({
+      inputImgBase64: screenshotBase64,
+      size,
+      elementsPositionInfo: [
+        {
+          rect: targetRect,
+        },
+      ],
+      borderThickness: 3,
+    });
+
+    if (opt?.deepThink) {
+      const searchArea = expandSearchArea(targetRect, context.size);
+      debug('describe: set searchArea', searchArea);
+      imagePayload = await cropByRect(
+        imagePayload,
+        searchArea,
+        getAIConfigInBoolean(MIDSCENE_USE_QWEN_VL),
+      );
+    }
+
+    const msgs: AIArgs = [
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: {
+              url: imagePayload,
+              detail: 'high',
+            },
+          },
+        ],
+      },
+    ];
+
+    const callAIFn =
+      this.aiVendorFn || callToGetJSONObject<AIDescribeElementResponse>;
+
+    const res = await callAIFn(msgs, AIActionType.DESCRIBE_ELEMENT);
+
+    const { content } = res;
+    assert(!content.error, `describe failed: ${content.error}`);
+    assert(content.description, 'failed to describe the element');
+    return content;
   }
 }

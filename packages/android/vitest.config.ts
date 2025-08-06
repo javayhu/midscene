@@ -11,7 +11,18 @@ dotenv.config({
   path: path.join(__dirname, '../../.env'),
 });
 
-const testFiles = ['tests/ai/**/*.test.ts'];
+const aiTestType = process.env.AI_TEST_TYPE;
+const unitTests = ['tests/unit-test/**/*.test.ts'];
+const aiAndroidTests = ['tests/ai/**/*.test.ts'];
+
+const testFiles = (() => {
+  switch (aiTestType) {
+    case 'android':
+      return [...aiAndroidTests];
+    default:
+      return unitTests;
+  }
+})();
 
 export default defineConfig({
   resolve: {
@@ -26,5 +37,8 @@ export default defineConfig({
   },
   define: {
     __VERSION__: `'${version}'`,
+  },
+  ssr: {
+    external: ['@silvia-odwyer/photon'],
   },
 });

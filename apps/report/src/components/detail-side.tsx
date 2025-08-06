@@ -1,13 +1,12 @@
 /* eslint-disable max-lines */
 'use client';
 import './detail-side.less';
-import { timeStr } from '@/utils';
+import { timeStr } from '@midscene/visualizer';
 import { paramStr, typeStr } from '@midscene/web/ui-utils';
 
 import { RadiusSettingOutlined } from '@ant-design/icons';
 import type {
   BaseElement,
-  ExecutionTask,
   ExecutionTaskInsightAssertion,
   ExecutionTaskPlanning,
 } from '@midscene/core';
@@ -16,7 +15,6 @@ import {
   timeCostStrElement,
 } from '@midscene/visualizer';
 import { Tag, Timeline, type TimelineItemProps, Tooltip } from 'antd';
-import PanelTitle from './panel-title';
 import { useExecutionDump } from './store';
 
 const noop = () => {};
@@ -161,10 +159,7 @@ const DetailSide = (): JSX.Element => {
           <span key={index}>{elementEl(item)}</span>
         ));
       } else {
-        content =
-          typeof value === 'string'
-            ? value
-            : JSON.stringify(value, undefined, 2);
+        content = <pre>{JSON.stringify(value, undefined, 2)}</pre>;
       }
 
       return (
@@ -174,10 +169,6 @@ const DetailSide = (): JSX.Element => {
       );
     });
   };
-
-  const usageInfo = (task as ExecutionTask)?.usage
-    ? JSON.stringify((task as ExecutionTask)?.usage, undefined, 2)
-    : '';
 
   const metaKVElement = MetaKV({
     data: [
@@ -197,35 +188,46 @@ const DetailSide = (): JSX.Element => {
         key: 'total time',
         content: timeCostStrElement(task?.timing?.cost),
       },
-      ...(task?.timing?.aiCost
+      ...(task?.usage?.time_cost
         ? [
             {
               key: 'AI service time',
-              content: timeCostStrElement(task?.timing?.aiCost),
+              content: <pre>{timeCostStrElement(task?.usage?.time_cost)}</pre>,
             },
           ]
         : []),
-      {
-        key: 'cache',
-        content: task?.cache ? JSON.stringify(task?.cache) : 'false',
-      },
+      ...(task?.hitBy
+        ? [
+            {
+              key: 'hitBy',
+              content: <pre>{JSON.stringify(task?.hitBy, undefined, 2)}</pre>,
+            },
+          ]
+        : []),
       ...(task?.locate
         ? [
             {
               key: 'locate',
-              content: JSON.stringify(task.locate),
+              content: <pre>{JSON.stringify(task.locate, undefined, 2)}</pre>,
             },
           ]
         : []),
-      ...(usageInfo ? [{ key: 'usage', content: usageInfo }] : []),
+      ...(task?.usage
+        ? [
+            {
+              key: 'usage',
+              content: <pre>{JSON.stringify(task.usage, undefined, 2)}</pre>,
+            },
+          ]
+        : []),
     ],
   });
 
-  let taskParam: JSX.Element | null = null;
+  let taskInput: JSX.Element | null = null;
   if (task?.type === 'Planning') {
     const planningTask = task as ExecutionTaskPlanning;
     if (planningTask.param?.userInstruction) {
-      taskParam = MetaKV({
+      taskInput = MetaKV({
         data: [
           { key: 'type', content: (task && typeStr(task)) || '' },
           {
@@ -239,7 +241,7 @@ const DetailSide = (): JSX.Element => {
         ],
       });
     } else {
-      taskParam = MetaKV({
+      taskInput = MetaKV({
         data: [
           { key: 'type', content: (task && typeStr(task)) || '' },
           {
@@ -250,7 +252,7 @@ const DetailSide = (): JSX.Element => {
       });
     }
   } else if (task?.type === 'Insight') {
-    taskParam = MetaKV({
+    taskInput = MetaKV({
       data: [
         { key: 'type', content: (task && typeStr(task)) || '' },
         ...(paramStr(task)
@@ -280,7 +282,7 @@ const DetailSide = (): JSX.Element => {
       ],
     });
   } else if (task?.type === 'Action') {
-    taskParam = MetaKV({
+    taskInput = MetaKV({
       data: [
         { key: 'type', content: (task && typeStr(task)) || '' },
         {
@@ -289,6 +291,10 @@ const DetailSide = (): JSX.Element => {
         },
       ],
     });
+  } else if (task?.type === 'Log') {
+    taskInput = task.param?.content ? (
+      <pre className="log-content">{task.param.content}</pre>
+    ) : null;
   }
 
   let outputDataContent = null;
@@ -354,72 +360,94 @@ const DetailSide = (): JSX.Element => {
       />
     );
   } else if (plans) {
-    let timelineData: TimelineItemProps[] = [];
-    timelineData = timelineData.concat(
-      plans.map((item) => {
-        const paramToShow = item.param || {};
-        const paramStr = Object.keys(paramToShow).length
-          ? JSON.stringify(paramToShow, undefined, 2)
-          : null;
-
-        const locateStr =
-          item.type === 'Locate' && item.locate
-            ? JSON.stringify(item.locate)
+    if (task?.subType === 'LoadYaml') {
+      outputDataContent = (
+        <Card
+          liteMode={true}
+          title=""
+          onMouseEnter={noop}
+          onMouseLeave={noop}
+          content={
+            <pre className="description-content">
+              {(task as ExecutionTaskPlanning).output?.yamlString}
+            </pre>
+          }
+        />
+      );
+    } else {
+      let timelineData: TimelineItemProps[] = [];
+      timelineData = timelineData.concat(
+        plans.map((item) => {
+          const paramToShow = item.param || {};
+          const paramStr = Object.keys(paramToShow).length
+            ? JSON.stringify(paramToShow, undefined, 2)
             : null;
 
-        return {
+          const locateStr =
+            item.type === 'Locate' && item.locate
+              ? JSON.stringify(item.locate, undefined, 2)
+              : null;
+
+          return {
+            color: '#06B1AB',
+            children: (
+              <>
+                <p>
+                  <b>{typeStr(item as any)}</b>
+                </p>
+                <p>{item.thought}</p>
+                <p>
+                  <pre>{paramStr}</pre>
+                </p>
+                <p>
+                  <pre>{locateStr}</pre>
+                </p>
+              </>
+            ),
+          };
+        }),
+      );
+
+      if ((task as ExecutionTaskPlanning).output?.log) {
+        timelineData.push({
           color: '#06B1AB',
           children: (
             <>
               <p>
-                <b>{typeStr(item as any)}</b>
+                <b>Log - What have been done</b>
               </p>
-              <p>{item.thought}</p>
-              <p>{paramStr}</p>
-              <p>{locateStr}</p>
+              <p>{(task as ExecutionTaskPlanning).output?.log}</p>
             </>
           ),
-        };
-      }),
-    );
+        });
+      }
 
-    if ((task as ExecutionTaskPlanning).output?.log) {
-      timelineData.push({
-        color: '#06B1AB',
-        children: (
-          <>
-            <p>
-              <b>Log - What have been done</b>
-            </p>
-            <p>{(task as ExecutionTaskPlanning).output?.log}</p>
-          </>
-        ),
-      });
+      if (
+        typeof (task as ExecutionTaskPlanning).output
+          ?.more_actions_needed_by_instruction === 'boolean'
+      ) {
+        timelineData.push({
+          color: '#06B1AB',
+          children: (
+            <>
+              <p>
+                <b>More actions needed</b>
+              </p>
+              <p>
+                {(task as ExecutionTaskPlanning).output
+                  ?.more_actions_needed_by_instruction
+                  ? 'true'
+                  : 'false'}
+              </p>
+            </>
+          ),
+        });
+      }
+
+      outputDataContent = (
+        <Timeline items={timelineData} className="detail-side-timeline" />
+      );
     }
-
-    if (
-      typeof (task as ExecutionTaskPlanning).output
-        ?.more_actions_needed_by_instruction === 'boolean'
-    ) {
-      timelineData.push({
-        color: '#06B1AB',
-        children: (
-          <>
-            <p>
-              <b>More actions needed</b>
-            </p>
-            <p>
-              {(task as ExecutionTaskPlanning).output
-                ?.more_actions_needed_by_instruction
-                ? 'true'
-                : 'false'}
-            </p>
-          </>
-        ),
-      });
-    }
-
-    outputDataContent = <Timeline items={timelineData} />;
   } else {
     let data;
 
@@ -448,15 +476,23 @@ const DetailSide = (): JSX.Element => {
 
   return (
     <div className="detail-side">
-      {/* Meta */}
-      <PanelTitle title="Task Meta" />
-      {metaKVElement}
-      {/* Param  */}
-      <PanelTitle title="Param" />
-      {taskParam}
-      {/* Response */}
-      <PanelTitle title={task?.subType === 'Locate' ? 'Element' : 'Output'} />
-      <div className="item-list item-list-space-up">{outputDataContent}</div>
+      <div className="info-tabs">
+        <div className="info-tab">Information</div>
+      </div>
+      <div className="info-content">
+        <details open>
+          <summary>Task meta</summary>
+          {metaKVElement}
+        </details>
+        <details open>
+          <summary>Param</summary>
+          {taskInput}
+        </details>
+        <details open>
+          <summary>{task?.subType === 'Locate' ? 'Element' : 'Output'}</summary>
+          <div className="item-list">{outputDataContent}</div>
+        </details>
+      </div>
     </div>
   );
 };

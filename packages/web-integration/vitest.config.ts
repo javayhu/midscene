@@ -35,10 +35,13 @@ export default defineConfig({
   },
   test: {
     include: testFiles,
-    testTimeout: 3 * 60 * 1000, // Global timeout set to 10 seconds
+    testTimeout: 3 * 60 * 1000, // Global timeout set to 3 minutes
     dangerouslyIgnoreUnhandledErrors: !!process.env.CI, // showcase.test.ts is not stable
   },
   define: {
     __VERSION__: `'${version}'`,
+  },
+  ssr: {
+    external: ['@silvia-odwyer/photon'],
   },
 });

@@ -1,11 +1,12 @@
-import type { ElementInfo } from '.';
 import {
   CONTAINER_MINI_HEIGHT,
   CONTAINER_MINI_WIDTH,
   NodeType,
 } from '../constants/index';
+import type { WebElementInfo } from '../types';
 import type { Point } from '../types';
 import {
+  isAElement,
   isButtonElement,
   isContainerElement,
   isFormElement,
@@ -14,54 +15,53 @@ import {
 } from './dom-util';
 import { descriptionOfTree } from './tree';
 import {
+  elementRect,
   getNodeAttributes,
   getPseudoElementContent,
   getRect,
   getTopDocument,
   logger,
   midsceneGenerateHash,
-  setDataForNode,
   setDebugMode,
-  visibleRect,
 } from './util';
-
-interface WebElementInfo extends ElementInfo {
-  zoom: number;
-  screenWidth?: number;
-  screenHeight?: number;
-}
 
 let indexId = 0;
 
 function tagNameOfNode(node: globalThis.Node): string {
   let tagName = '';
   if (node instanceof HTMLElement) {
-    tagName = node.tagName.toLowerCase();
-  }
-
-  const parentElement = node.parentElement;
-  if (parentElement && parentElement instanceof HTMLElement) {
-    tagName = parentElement.tagName.toLowerCase();
+    tagName = node.tagName?.toLowerCase();
+  } else {
+    const parentElement = node.parentElement;
+    if (parentElement && parentElement instanceof HTMLElement) {
+      tagName = parentElement.tagName?.toLowerCase();
+    }
   }
 
   return tagName ? `<${tagName}>` : '';
 }
 
-function collectElementInfo(
+export function collectElementInfo(
   node: Node,
   currentWindow: typeof window,
   currentDocument: typeof document,
   baseZoom = 1,
   basePoint: Point = { left: 0, top: 0 },
-): WebElementInfo | null {
-  const rect = visibleRect(node, currentWindow, currentDocument, baseZoom);
+  isContainer = false, // if true, the element will be considered as a container
+): WebElementInfo | null | any {
+  const rect = elementRect(node, currentWindow, currentDocument, baseZoom);
+
+  if (!rect) {
+    return null;
+  }
+
   if (
-    !rect ||
     rect.width < CONTAINER_MINI_WIDTH ||
     rect.height < CONTAINER_MINI_HEIGHT
   ) {
     return null;
   }
+
   if (basePoint.left !== 0 || basePoint.top !== 0) {
     rect.left += basePoint.left;
     rect.top += basePoint.top;
@@ -77,7 +77,6 @@ function collectElementInfo(
     let valueContent =
       attributes.value || attributes.placeholder || node.textContent || '';
     const nodeHashId = midsceneGenerateHash(node, valueContent, rect);
-    const selector = setDataForNode(node, nodeHashId, false, currentWindow);
     const tagName = (node as HTMLElement).tagName.toLowerCase();
     if ((node as HTMLElement).tagName.toLowerCase() === 'select') {
       // Get the selected option using the selectedIndex property
@@ -86,7 +85,7 @@ function collectElementInfo(
       ];
 
       // Retrieve the text content of the selected option
-      valueContent = selectedOption.textContent || '';
+      valueContent = selectedOption?.textContent || '';
     }
 
     if (
@@ -100,7 +99,6 @@ function collectElementInfo(
     const elementInfo: WebElementInfo = {
       id: nodeHashId,
       nodeHashId,
-      locator: selector,
       nodeType: NodeType.FORM_ITEM,
       indexId: indexId++,
       attributes: {
@@ -115,24 +113,30 @@ function collectElementInfo(
         Math.round(rect.top + rect.height / 2),
       ],
       zoom: rect.zoom,
-      screenWidth: currentWindow.innerWidth,
-      screenHeight: currentWindow.innerHeight,
+      isVisible: rect.isVisible,
     };
     return elementInfo;
   }
 
   if (isButtonElement(node)) {
+    const rect = mergeElementAndChildrenRects(
+      node,
+      currentWindow,
+      currentDocument,
+      baseZoom,
+    );
+    if (!rect) {
+      return null;
+    }
     const attributes = getNodeAttributes(node, currentWindow);
     const pseudo = getPseudoElementContent(node, currentWindow);
     const content = node.innerText || pseudo.before || pseudo.after || '';
     const nodeHashId = midsceneGenerateHash(node, content, rect);
-    const selector = setDataForNode(node, nodeHashId, false, currentWindow);
     const elementInfo: WebElementInfo = {
       id: nodeHashId,
       indexId: indexId++,
       nodeHashId,
       nodeType: NodeType.BUTTON,
-      locator: selector,
       attributes: {
         ...attributes,
         htmlTagName: tagNameOfNode(node),
@@ -145,8 +149,7 @@ function collectElementInfo(
         Math.round(rect.top + rect.height / 2),
       ],
       zoom: rect.zoom,
-      screenWidth: currentWindow.innerWidth,
-      screenHeight: currentWindow.innerHeight,
+      isVisible: rect.isVisible,
     };
     return elementInfo;
   }
@@ -154,15 +157,13 @@ function collectElementInfo(
   if (isImgElement(node)) {
     const attributes = getNodeAttributes(node, currentWindow);
     const nodeHashId = midsceneGenerateHash(node, '', rect);
-    const selector = setDataForNode(node, nodeHashId, false, currentWindow);
     const elementInfo: WebElementInfo = {
       id: nodeHashId,
       indexId: indexId++,
       nodeHashId,
-      locator: selector,
       attributes: {
         ...attributes,
-        ...(node.nodeName.toLowerCase() === 'svg'
+        ...(node.nodeName?.toLowerCase() === 'svg'
           ? {
               svgContent: 'true',
             }
@@ -178,8 +179,7 @@ function collectElementInfo(
         Math.round(rect.top + rect.height / 2),
       ],
       zoom: rect.zoom,
-      screenWidth: currentWindow.innerWidth,
-      screenHeight: currentWindow.innerHeight,
+      isVisible: rect.isVisible,
     };
     return elementInfo;
   }
@@ -195,13 +195,11 @@ function collectElementInfo(
       return null;
     }
     const nodeHashId = midsceneGenerateHash(node, text, rect);
-    const selector = setDataForNode(node, nodeHashId, true, currentWindow);
     const elementInfo: WebElementInfo = {
       id: nodeHashId,
       indexId: indexId++,
       nodeHashId,
       nodeType: NodeType.TEXT,
-      locator: selector,
       attributes: {
         ...attributes,
         nodeType: NodeType.TEXT,
@@ -211,27 +209,50 @@ function collectElementInfo(
         Math.round(rect.left + rect.width / 2),
         Math.round(rect.top + rect.height / 2),
       ],
-      // attributes,
       content: text,
       rect,
       zoom: rect.zoom,
-      screenWidth: currentWindow.innerWidth,
-      screenHeight: currentWindow.innerHeight,
+      isVisible: rect.isVisible,
+    };
+    return elementInfo;
+  }
+
+  if (isAElement(node)) {
+    const attributes = getNodeAttributes(node, currentWindow);
+    const pseudo = getPseudoElementContent(node, currentWindow);
+    const content = node.innerText || pseudo.before || pseudo.after || '';
+    const nodeHashId = midsceneGenerateHash(node, content, rect);
+    const elementInfo: WebElementInfo = {
+      id: nodeHashId,
+      indexId: indexId++,
+      nodeHashId,
+      nodeType: NodeType.A,
+      attributes: {
+        ...attributes,
+        htmlTagName: tagNameOfNode(node),
+        nodeType: NodeType.A,
+      },
+      content,
+      rect,
+      center: [
+        Math.round(rect.left + rect.width / 2),
+        Math.round(rect.top + rect.height / 2),
+      ],
+      zoom: rect.zoom,
+      isVisible: rect.isVisible,
     };
     return elementInfo;
   }
 
   // else, consider as a container
-  if (isContainerElement(node)) {
+  if (isContainerElement(node) || isContainer) {
     const attributes = getNodeAttributes(node, currentWindow);
     const nodeHashId = midsceneGenerateHash(node, '', rect);
-    const selector = setDataForNode(node, nodeHashId, false, currentWindow);
     const elementInfo: WebElementInfo = {
       id: nodeHashId,
       nodeHashId,
       indexId: indexId++,
       nodeType: NodeType.CONTAINER,
-      locator: selector,
       attributes: {
         ...attributes,
         nodeType: NodeType.CONTAINER,
@@ -244,8 +265,7 @@ function collectElementInfo(
         Math.round(rect.top + rect.height / 2),
       ],
       zoom: rect.zoom,
-      screenWidth: currentWindow.innerWidth,
-      screenHeight: currentWindow.innerHeight,
+      isVisible: rect.isVisible,
     };
     return elementInfo;
   }
@@ -280,10 +300,11 @@ export function extractTextWithPosition(
 
 export function extractTreeNodeAsString(
   initNode: globalThis.Node,
+  visibleOnly = false,
   debugMode = false,
 ): string {
   const elementNode = extractTreeNode(initNode, debugMode);
-  return descriptionOfTree(elementNode);
+  return descriptionOfTree(elementNode, undefined, false, visibleOnly);
 }
 
 export function extractTreeNode(
@@ -303,7 +324,7 @@ export function extractTreeNode(
     currentDocument: typeof globalThis.document,
     baseZoom = 1,
     basePoint: Point = { left: 0, top: 0 },
-  ): WebElementNode | null {
+  ): WebElementNode | WebElementNode[] | null {
     if (!node) {
       return null;
     }
@@ -334,13 +355,13 @@ export function extractTreeNode(
       node: elementInfo,
       children: [],
     };
-    // stop collecting if the node is a Button or Image
+    // stop collecting if the node is a Button/Image/Text/FormItem/Container
     if (
       elementInfo?.nodeType === NodeType.BUTTON ||
       elementInfo?.nodeType === NodeType.IMG ||
       elementInfo?.nodeType === NodeType.TEXT ||
       elementInfo?.nodeType === NodeType.FORM_ITEM ||
-      elementInfo?.nodeType === NodeType.CONTAINER
+      elementInfo?.nodeType === NodeType.CONTAINER // TODO: need return the container node?
     ) {
       return nodeInfo;
     }
@@ -355,9 +376,21 @@ export function extractTreeNode(
         rect.zoom,
         basePoint,
       );
-      if (childNodeInfo) {
+      if (Array.isArray(childNodeInfo)) {
+        // if the recursive return is an array, expand and merge it into children
+        nodeInfo.children.push(...childNodeInfo);
+      } else if (childNodeInfo) {
         nodeInfo.children.push(childNodeInfo);
       }
+    }
+
+    // if nodeInfo.node is null
+    if (nodeInfo.node === null) {
+      if (nodeInfo.children.length === 0) {
+        return null;
+      }
+      // promote children to the upper layer
+      return nodeInfo.children;
     }
 
     return nodeInfo;
@@ -367,7 +400,9 @@ export function extractTreeNode(
     left: 0,
     top: 0,
   });
-  if (rootNodeInfo) {
+  if (Array.isArray(rootNodeInfo)) {
+    topChildren.push(...rootNodeInfo);
+  } else if (rootNodeInfo) {
     topChildren.push(rootNodeInfo);
   }
   if (startNode === topDocument) {
@@ -389,7 +424,9 @@ export function extractTreeNode(
               top: iframeInfo.rect.top,
             },
           );
-          if (iframeChildren) {
+          if (Array.isArray(iframeChildren)) {
+            topChildren.push(...iframeChildren);
+          } else if (iframeChildren) {
             topChildren.push(iframeChildren);
           }
         }
@@ -400,5 +437,45 @@ export function extractTreeNode(
   return {
     node: null,
     children: topChildren,
+  };
+}
+
+export function mergeElementAndChildrenRects(
+  node: Node,
+  currentWindow: typeof window,
+  currentDocument: typeof document,
+  baseZoom = 1,
+) {
+  const selfRect = elementRect(node, currentWindow, currentDocument, baseZoom);
+  if (!selfRect) return null;
+
+  let minLeft = selfRect.left;
+  let minTop = selfRect.top;
+  let maxRight = selfRect.left + selfRect.width;
+  let maxBottom = selfRect.top + selfRect.height;
+
+  function traverse(child: Node) {
+    for (let i = 0; i < child.childNodes.length; i++) {
+      const sub = child.childNodes[i];
+      if (sub.nodeType === 1) {
+        const rect = elementRect(sub, currentWindow, currentDocument, baseZoom);
+        if (rect) {
+          minLeft = Math.min(minLeft, rect.left);
+          minTop = Math.min(minTop, rect.top);
+          maxRight = Math.max(maxRight, rect.left + rect.width);
+          maxBottom = Math.max(maxBottom, rect.top + rect.height);
+        }
+        traverse(sub);
+      }
+    }
+  }
+  traverse(node);
+
+  return {
+    ...selfRect,
+    left: minLeft,
+    top: minTop,
+    width: maxRight - minLeft,
+    height: maxBottom - minTop,
   };
 }

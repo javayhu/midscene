@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { PlanningAIResponse, Rect } from '@midscene/core';
+import { NodeType } from '@midscene/shared/constants';
 import { vlLocateMode } from '@midscene/shared/env';
 import {
-  base64Encoded,
   compositeElementInfoImg,
   imageInfoOfBase64,
+  localImg2Base64,
 } from '@midscene/shared/img';
 import { parseContextFromWebPage } from '@midscene/web';
 
@@ -196,7 +197,7 @@ export function getCases(
 }
 
 export async function buildContextByImage(imagePath: string) {
-  const screenshotBase64 = base64Encoded(imagePath);
+  const screenshotBase64 = localImg2Base64(imagePath);
   const size = await imageInfoOfBase64(screenshotBase64);
 
   const fakePage = {
@@ -220,7 +221,7 @@ export async function buildContextByImage(imagePath: string) {
 export async function buildContext(pageName: string) {
   const targetDir = path.join(__dirname, '../page-data/', pageName);
   const screenshotBase64Path = path.join(targetDir, 'input.png');
-  const screenshotBase64 = base64Encoded(screenshotBase64Path);
+  const screenshotBase64 = localImg2Base64(screenshotBase64Path);
   const size = await imageInfoOfBase64(screenshotBase64);
 
   const fakePage = {
@@ -245,16 +246,25 @@ export async function buildContext(pageName: string) {
   return context;
 }
 
-export async function annotateRects(imgBase64: string, rects: Rect[]) {
+export async function annotateRects(
+  imgBase64: string,
+  rects: Rect[],
+  prompt?: string,
+) {
   const markedImage = await compositeElementInfoImg({
     inputImgBase64: imgBase64,
     elementsPositionInfo: rects.map((rect, index) => {
       return {
+        id: `rect-${index}`,
         rect,
         indexId: index + 1,
+        attributes: { nodeType: NodeType.CONTAINER },
+        content: '',
+        center: [rect.left + rect.width / 2, rect.top + rect.height / 2],
       };
     }),
     annotationPadding: 0,
+    prompt,
   });
   return markedImage;
 }

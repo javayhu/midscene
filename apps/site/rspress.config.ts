@@ -1,15 +1,12 @@
 import * as path from 'node:path';
+import { defineConfig } from '@rspress/core';
 import { pluginLlms } from '@rspress/plugin-llms';
-import sitemap from 'rspress-plugin-sitemap';
-import { defineConfig } from 'rspress/config';
+import { pluginSitemap } from '@rspress/plugin-sitemap';
 
 export default defineConfig({
   root: path.join(__dirname, 'docs'),
   title:
     '(AI UI Automation, AI Testing, Computer Use, Browser Use, Android Use)',
-  search: {
-    codeBlocks: true,
-  },
   description:
     'AI UI Automation, AI Testing, Computer Use, Browser Use, Android Use. It offers JavaScript SDK, Chrome extension, and support for scripting in YAML.',
   icon: '/midscene-icon.png',
@@ -18,6 +15,7 @@ export default defineConfig({
     dark: '/midscene_with_text_light.png',
   },
   themeConfig: {
+    lastUpdated: true,
     darkMode: false,
     socialLinks: [
       {
@@ -47,11 +45,21 @@ export default defineConfig({
         lang: 'en',
         outlineTitle: 'On This Page',
         label: 'On This Page',
+        editLink: {
+          docRepoBaseUrl:
+            'https://github.com/web-infra-dev/midscene/tree/main/apps/site/docs',
+          text: '📝 Edit this page on GitHub',
+        },
       },
       {
         lang: 'zh',
         outlineTitle: '大纲',
         label: '大纲',
+        editLink: {
+          docRepoBaseUrl:
+            'https://github.com/web-infra-dev/midscene/tree/main/apps/site/docs',
+          text: '📝 在 GitHub 上编辑此页',
+        },
       },
     ],
     sidebar: {
@@ -74,7 +82,7 @@ export default defineConfig({
           items: [
             {
               text: 'MCP Server',
-              link: '/mcp',
+              link: '/web-mcp',
             },
             {
               text: 'Integrate with Playwright',
@@ -97,6 +105,10 @@ export default defineConfig({
         {
           text: 'Android Automation',
           items: [
+            {
+              text: 'MCP Server',
+              link: '/mcp-android',
+            },
             {
               text: 'Quick Experience by Android Playground',
               link: '/quick-experience-with-android',
@@ -165,6 +177,14 @@ export default defineConfig({
               text: 'Introducing Instant Actions and Deep Think',
               link: '/blog-introducing-instant-actions-and-deep-think',
             },
+            {
+              text: 'Use JavaScript to Optimize the AI Automation Code',
+              link: '/blog-programming-practice-using-structured-api',
+            },
+            {
+              text: 'Changelog',
+              link: '/changelog',
+            },
           ],
         },
       ],
@@ -187,7 +207,7 @@ export default defineConfig({
           items: [
             {
               text: 'MCP 服务',
-              link: '/zh/mcp',
+              link: '/zh/web-mcp',
             },
             {
               text: '集成到 Playwright',
@@ -210,6 +230,10 @@ export default defineConfig({
         {
           text: 'Android 自动化',
           items: [
+            {
+              text: 'MCP 服务',
+              link: '/zh/mcp-android',
+            },
             {
               text: '使用 Android Playground 快速体验',
               link: '/zh/quick-experience-with-android',
@@ -278,6 +302,14 @@ export default defineConfig({
               text: '即时操作和深度思考',
               link: '/zh/blog-introducing-instant-actions-and-deep-think',
             },
+            {
+              text: '使用 JavaScript 优化 AI 自动化代码',
+              link: '/zh/blog-programming-practice-using-structured-api',
+            },
+            {
+              text: '更新日志',
+              link: '/zh/changelog',
+            },
           ],
         },
       ],
@@ -330,9 +362,28 @@ export default defineConfig({
   },
   lang: 'en',
   plugins: [
-    pluginLlms(),
-    sitemap({
-      domain: 'https://midscenejs.com',
+    pluginLlms([
+      {
+        llmsTxt: {
+          name: 'llms.txt',
+        },
+        llmsFullTxt: {
+          name: 'llms-full.txt',
+        },
+        include: ({ page }) => page.lang === 'en',
+      },
+      {
+        llmsTxt: {
+          name: 'zh/llms.txt',
+        },
+        llmsFullTxt: {
+          name: 'zh/llms-full.txt',
+        },
+        include: ({ page }) => page.lang === 'zh',
+      },
+    ]),
+    pluginSitemap({
+      siteUrl: 'https://midscenejs.com',
     }),
   ],
 });

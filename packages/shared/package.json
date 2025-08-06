@@ -1,6 +1,6 @@
 {
   "name": "@midscene/shared",
-  "version": "0.16.10",
+  "version": "0.25.1",
   "repository": "https://github.com/web-infra-dev/midscene",
   "homepage": "https://midscenejs.com/",
   "types": "./dist/types/index.d.ts",
@@ -17,7 +17,8 @@
     "./keyboard-layout": "./dist/lib/us-keyboard-layout.js",
     "./logger": "./dist/lib/logger.js",
     "./common": "./dist/lib/common.js",
-    "./env": "./dist/lib/env.js"
+    "./env": "./dist/lib/env.js",
+    "./types": "./dist/lib/types.js"
   },
   "typesVersions": {
     "*": {
@@ -31,16 +32,17 @@
       "keyboard-layout": ["./dist/types/us-keyboard-layout.d.ts"],
       "logger": ["./dist/types/logger.d.ts"],
       "common": ["./dist/types/common.d.ts"],
-      "env": ["./dist/types/env.d.ts"]
+      "env": ["./dist/types/env.d.ts"],
+      "types": ["./dist/types/types.d.ts"]
     }
   },
   "files": ["dist", "src", "README.md"],
   "scripts": {
-    "dev": "modern dev",
-    "build": "npm run build:pkg && npm run build:script",
+    "dev": "npm run build:watch",
+    "build": "npm run build:script && npm run build:pkg",
     "build:pkg": "modern build -c ./modern.config.ts",
     "build:script": "modern build -c ./modern.inspect.config.ts",
-    "build:watch": "modern build -w",
+    "build:watch": "npm run build:script && modern build -w --no-clear",
     "reset": "rimraf ./**/node_modules",
     "lint": "modern lint",
     "bump": "modern bump",
@@ -51,13 +53,15 @@
     "new": "modern new",
     "upgrade": "modern upgrade",
     "test": "vitest --run",
-    "test:u": "vitest --run -u",
-    "test:ai": "AITEST=true npm run test"
+    "test:u": "vitest --run -u"
   },
   "dependencies": {
+    "@silvia-odwyer/photon": "0.3.3",
+    "@silvia-odwyer/photon-node": "0.3.3",
     "debug": "4.4.0",
     "jimp": "0.22.12",
-    "js-sha256": "0.11.0"
+    "js-sha256": "0.11.0",
+    "sharp": "0.33.5"
   },
   "devDependencies": {
     "@modern-js/module-tools": "2.60.6",
@@ -66,12 +70,13 @@
     "@ui-tars/shared": "1.2.0",
     "dotenv": "16.4.5",
     "rimraf": "~3.0.2",
-    "typescript": "^5.8.2",
+    "typescript": "^5.8.3",
     "vitest": "3.0.5"
   },
   "sideEffects": [],
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
-  }
+  },
+  "license": "MIT"
 }

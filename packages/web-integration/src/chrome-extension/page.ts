@@ -7,7 +7,7 @@
 
 import type { WebKeyInput } from '@/common/page';
 import { limitOpenNewTabScript } from '@/common/ui-utils';
-import type { AbstractPage, ChromePageDestroyOptions } from '@/page';
+import type { AbstractPage, MouseButton } from '@/page';
 import type { ElementTreeNode, Point, Size } from '@midscene/core';
 import type { ElementInfo } from '@midscene/shared/extractor';
 import { treeToList } from '@midscene/shared/extractor';
@@ -41,6 +41,10 @@ export default class ChromeExtensionProxyPage implements AbstractPage {
   private attachingDebugger: Promise<void> | null = null;
 
   private destroyed = false;
+
+  private isMobileEmulation: boolean | null = null;
+
+  public _continueWhenFailedToAttachDebugger = false;
 
   constructor(forceSameTabNavigation: boolean) {
     this.forceSameTabNavigation = forceSameTabNavigation;
@@ -141,7 +145,19 @@ export default class ChromeExtensionProxyPage implements AbstractPage {
 
         // detach any debugger attached to the tab
         console.log('attaching debugger', currentTabId);
-        await chrome.debugger.attach({ tabId: currentTabId }, '1.3');
+        try {
+          await chrome.debugger.attach({ tabId: currentTabId }, '1.3');
+        } catch (e) {
+          if (this._continueWhenFailedToAttachDebugger) {
+            console.warn(
+              'Failed to attach debugger, but the script will continue as if the debugger is attached since the _continueWhenFailedToAttachDebugger is true',
+              e,
+            );
+          } else {
+            throw e;
+          }
+        }
+
         // wait util the debugger banner in Chrome appears
         await sleep(500);
 
@@ -272,6 +288,8 @@ export default class ChromeExtensionProxyPage implements AbstractPage {
     });
 
     const expression = () => {
+      (window as any).midscene_element_inspector.setNodeHashCacheListOnWindow();
+
       return {
         tree: (window as any).midscene_element_inspector.webExtractNodeTree(),
         size: {
@@ -333,9 +351,62 @@ export default class ChromeExtensionProxyPage implements AbstractPage {
     );
   }
 
+  // @deprecated
   async getElementsInfo() {
     const tree = await this.getElementsNodeTree();
     return treeToList(tree);
+  }
+
+  async getXpathsById(id: string) {
+    const script = await getHtmlElementScript();
+
+    // check tab url
+    await this.sendCommandToDebugger<
+      CDPTypes.Runtime.EvaluateResponse,
+      CDPTypes.Runtime.EvaluateRequest
+    >('Runtime.evaluate', {
+      expression: script,
+    });
+
+    const result = await this.sendCommandToDebugger('Runtime.evaluate', {
+      expression: `window.midscene_element_inspector.getXpathsById('${id}')`,
+      returnByValue: true,
+    });
+    return result.result.value;
+  }
+
+  async getXpathsByPoint(point: Point, isOrderSensitive: boolean) {
+    const script = await getHtmlElementScript();
+
+    await this.sendCommandToDebugger<
+      CDPTypes.Runtime.EvaluateResponse,
+      CDPTypes.Runtime.EvaluateRequest
+    >('Runtime.evaluate', {
+      expression: script,
+    });
+
+    const result = await this.sendCommandToDebugger('Runtime.evaluate', {
+      expression: `window.midscene_element_inspector.getXpathsByPoint({left: ${point.left}, top: ${point.top}}, ${isOrderSensitive})`,
+      returnByValue: true,
+    });
+    return result.result.value;
+  }
+
+  async getElementInfoByXpath(xpath: string) {
+    const script = await getHtmlElementScript();
+
+    // check tab url
+    await this.sendCommandToDebugger<
+      CDPTypes.Runtime.EvaluateResponse,
+      CDPTypes.Runtime.EvaluateRequest
+    >('Runtime.evaluate', {
+      expression: script,
+    });
+    const result = await this.sendCommandToDebugger('Runtime.evaluate', {
+      expression: `window.midscene_element_inspector.getElementInfoByXpath('${xpath}')`,
+      returnByValue: true,
+    });
+    return result.result.value;
   }
 
   async getElementsNodeTree() {
@@ -471,22 +542,55 @@ export default class ChromeExtensionProxyPage implements AbstractPage {
   private latestMouseY = 100;
 
   mouse = {
-    click: async (x: number, y: number) => {
+    click: async (
+      x: number,
+      y: number,
+      options?: { button?: MouseButton; count?: number },
+    ) => {
+      const { button = 'left', count = 1 } = options || {};
       await this.mouse.move(x, y);
-      await this.sendCommandToDebugger('Input.dispatchMouseEvent', {
-        type: 'mousePressed',
-        x,
-        y,
-        button: 'left',
-        clickCount: 1,
-      });
-      await this.sendCommandToDebugger('Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x,
-        y,
-        button: 'left',
-        clickCount: 1,
-      });
+      // detect if the page is in mobile emulation mode
+      if (this.isMobileEmulation === null) {
+        const result = await this.sendCommandToDebugger('Runtime.evaluate', {
+          expression: `(() => {
+            return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+          })()`,
+          returnByValue: true,
+        });
+        this.isMobileEmulation = result?.result?.value;
+      }
+
+      if (this.isMobileEmulation && button === 'left') {
+        // in mobile emulation mode, directly inject click event
+        const touchPoints = [{ x: Math.round(x), y: Math.round(y) }];
+        await this.sendCommandToDebugger('Input.dispatchTouchEvent', {
+          type: 'touchStart',
+          touchPoints,
+          modifiers: 0,
+        });
+
+        await this.sendCommandToDebugger('Input.dispatchTouchEvent', {
+          type: 'touchEnd',
+          touchPoints: [],
+          modifiers: 0,
+        });
+      } else {
+        // standard mousePressed + mouseReleased
+        await this.sendCommandToDebugger('Input.dispatchMouseEvent', {
+          type: 'mousePressed',
+          x,
+          y,
+          button,
+          clickCount: count,
+        });
+        await this.sendCommandToDebugger('Input.dispatchMouseEvent', {
+          type: 'mouseReleased',
+          x,
+          y,
+          button,
+          clickCount: count,
+        });
+      }
     },
     wheel: async (
       deltaX: number,

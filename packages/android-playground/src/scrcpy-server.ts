@@ -2,11 +2,12 @@ import { exec } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { SCRCPY_SERVER_PORT } from '@midscene/shared/constants';
 import { getDebug } from '@midscene/shared/logger';
 import type { Adb, AdbServerClient } from '@yume-chan/adb';
-
 import cors from 'cors';
 import express from 'express';
 import { Server } from 'socket.io';
@@ -178,12 +179,18 @@ export default class ScrcpyServer {
     const { ScrcpyOptions3_1, DefaultServerPath } = await import(
       '@yume-chan/scrcpy'
     );
-    const { BIN } = await import('@yume-chan/fetch-scrcpy-server');
+    // Use __dirname in a way that works for both ESM and CommonJS
+    const currentDir =
+      typeof __dirname !== 'undefined'
+        ? __dirname
+        : path.dirname(fileURLToPath(import.meta.url));
+    const serverBinPath = path.resolve(currentDir, '../../bin/server.bin');
+
     try {
-      // Push server
+      // Push server - use file path directly for createReadStream
       await AdbScrcpyClient.pushServer(
         adb,
-        ReadableStream.from(createReadStream(BIN)),
+        ReadableStream.from(createReadStream(serverBinPath)),
       );
 
       // Start scrcpy service
@@ -501,7 +508,7 @@ export default class ScrcpyServer {
 
   // close server
   close() {
-    // 停止设备监控
+    // stop device monitoring
     if (this.devicePollInterval) {
       clearInterval(this.devicePollInterval);
       this.devicePollInterval = null;

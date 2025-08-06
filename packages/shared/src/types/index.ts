@@ -1,4 +1,5 @@
 import type { NodeType } from '../constants';
+import type { ElementInfo } from '../extractor';
 
 export interface Point {
   left: number;
@@ -29,7 +30,9 @@ export abstract class BaseElement {
 
   abstract center: [number, number];
 
-  abstract locator?: string;
+  abstract xpaths?: string[];
+
+  abstract isVisible: boolean;
 }
 
 export interface ElementTreeNode<
@@ -37,4 +40,8 @@ export interface ElementTreeNode<
 > {
   node: ElementType | null;
   children: ElementTreeNode<ElementType>[];
+}
+
+export interface WebElementInfo extends ElementInfo {
+  zoom: number;
 }

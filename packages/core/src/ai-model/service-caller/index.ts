@@ -1,4 +1,5 @@
 import { AIResponseFormat, type AIUsageInfo } from '@/types';
+import type { CodeGenerationChunk, StreamingCallback } from '@/types';
 import { Anthropic } from '@anthropic-ai/sdk';
 import {
   DefaultAzureCredential,
@@ -22,8 +23,6 @@ import {
   MIDSCENE_OPENAI_SOCKS_PROXY,
   MIDSCENE_USE_ANTHROPIC_SDK,
   MIDSCENE_USE_AZURE_OPENAI,
-  MIDSCENE_USE_QWEN_VL,
-  MIDSCENE_USE_VLM_UI_TARS,
   OPENAI_API_KEY,
   OPENAI_BASE_URL,
   OPENAI_MAX_TOKENS,
@@ -31,27 +30,34 @@ import {
   getAIConfig,
   getAIConfigInBoolean,
   getAIConfigInJson,
+  uiTarsModelVersion,
   vlLocateMode,
 } from '@midscene/shared/env';
 import { enableDebug, getDebug } from '@midscene/shared/logger';
 import { assert } from '@midscene/shared/utils';
 import { ifInBrowser } from '@midscene/shared/utils';
-import dJSON from 'dirty-json';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { jsonrepair } from 'jsonrepair';
 import OpenAI, { AzureOpenAI } from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources';
+import type { Stream } from 'openai/streaming';
 import { SocksProxyAgent } from 'socks-proxy-agent';
-import { AIActionType } from '../common';
+import { AIActionType, type AIArgs } from '../common';
 import { assertSchema } from '../prompt/assertion';
 import { locatorSchema } from '../prompt/llm-locator';
 import { planSchema } from '../prompt/llm-planning';
 
 export function checkAIConfig() {
-  if (getAIConfig(OPENAI_API_KEY)) return true;
-  if (getAIConfig(MIDSCENE_USE_AZURE_OPENAI)) return true;
-  if (getAIConfig(ANTHROPIC_API_KEY)) return true;
+  const openaiKey = getAIConfig(OPENAI_API_KEY);
+  const azureConfig = getAIConfig(MIDSCENE_USE_AZURE_OPENAI);
+  const anthropicKey = getAIConfig(ANTHROPIC_API_KEY);
+  const initConfigJson = getAIConfig(MIDSCENE_OPENAI_INIT_CONFIG_JSON);
 
-  return Boolean(getAIConfig(MIDSCENE_OPENAI_INIT_CONFIG_JSON));
+  if (openaiKey) return true;
+  if (azureConfig) return true;
+  if (anthropicKey) return true;
+
+  return Boolean(initConfigJson);
 }
 
 // if debug config is initialized
@@ -117,9 +123,12 @@ async function createChatClient({
   const httpProxy = getAIConfig(MIDSCENE_OPENAI_HTTP_PROXY);
 
   let proxyAgent = undefined;
+  const debugProxy = getDebug('ai:call:proxy');
   if (httpProxy) {
+    debugProxy('using http proxy', httpProxy);
     proxyAgent = new HttpsProxyAgent(httpProxy);
   } else if (socksProxy) {
+    debugProxy('using socks proxy', socksProxy);
     proxyAgent = new SocksProxyAgent(socksProxy);
   }
 
@@ -237,7 +246,16 @@ export async function call(
   responseFormat?:
     | OpenAI.ChatCompletionCreateParams['response_format']
     | OpenAI.ResponseFormatJSONObject,
-): Promise<{ content: string; usage?: AIUsageInfo }> {
+  options?: {
+    stream?: boolean;
+    onChunk?: StreamingCallback;
+  },
+): Promise<{ content: string; usage?: AIUsageInfo; isStreamed: boolean }> {
+  assert(
+    checkAIConfig(),
+    'Cannot find config for AI model service. If you are using a self-hosted model without validating the API key, please set `OPENAI_API_KEY` to any non-null value. https://midscenejs.com/model-provider.html',
+  );
+
   const { completion, style } = await createChatClient({
     AIActionTypeValue,
   });
@@ -249,94 +267,265 @@ export async function call(
 
   const startTime = Date.now();
   const model = getModelName();
+  const isStreaming = options?.stream && options?.onChunk;
   let content: string | undefined;
+  let accumulated = '';
   let usage: OpenAI.CompletionUsage | undefined;
+  let timeCost: number | undefined;
+
   const commonConfig = {
-    temperature: getAIConfigInBoolean(MIDSCENE_USE_VLM_UI_TARS) ? 0.0 : 0.1,
-    stream: false,
+    temperature: vlLocateMode() === 'vlm-ui-tars' ? 0.0 : 0.1,
+    stream: !!isStreaming,
     max_tokens:
       typeof maxTokens === 'number'
         ? maxTokens
         : Number.parseInt(maxTokens || '2048', 10),
-    ...(getAIConfigInBoolean(MIDSCENE_USE_QWEN_VL) // qwen specific config
+    ...(vlLocateMode() === 'qwen-vl' // qwen specific config
       ? {
           vl_high_resolution_images: true,
         }
       : {}),
   };
-  if (style === 'openai') {
-    debugCall(`sending request to ${model}`);
-    let result: Awaited<ReturnType<typeof completion.create>>;
-    try {
-      result = await completion.create({
-        model,
-        messages,
-        response_format: responseFormat,
-        ...commonConfig,
-      } as any);
-    } catch (e: any) {
-      const newError = new Error(
-        `failed to call AI model service: ${e.message}. Trouble shooting: https://midscenejs.com/model-provider.html`,
-        {
-          cause: e,
-        },
+
+  try {
+    if (style === 'openai') {
+      debugCall(
+        `sending ${isStreaming ? 'streaming ' : ''}request to ${model}`,
       );
-      throw newError;
+
+      if (isStreaming) {
+        const stream = (await completion.create(
+          {
+            model,
+            messages,
+            response_format: responseFormat,
+            ...commonConfig,
+          },
+          {
+            stream: true,
+          },
+        )) as Stream<OpenAI.Chat.Completions.ChatCompletionChunk> & {
+          _request_id?: string | null;
+        };
+
+        for await (const chunk of stream) {
+          const content = chunk.choices?.[0]?.delta?.content || '';
+          const reasoning_content =
+            (chunk.choices?.[0]?.delta as any)?.reasoning_content || '';
+
+          // Check for usage info in any chunk (OpenAI provides usage in separate chunks)
+          if (chunk.usage) {
+            usage = chunk.usage;
+          }
+
+          if (content || reasoning_content) {
+            accumulated += content;
+            const chunkData: CodeGenerationChunk = {
+              content,
+              reasoning_content,
+              accumulated,
+              isComplete: false,
+              usage: undefined,
+            };
+            options.onChunk!(chunkData);
+          }
+
+          // Check if stream is complete
+          if (chunk.choices?.[0]?.finish_reason) {
+            timeCost = Date.now() - startTime;
+
+            // If usage is not available from the stream, provide a basic usage info
+            if (!usage) {
+              // Estimate token counts based on content length (rough approximation)
+              const estimatedTokens = Math.max(
+                1,
+                Math.floor(accumulated.length / 4),
+              );
+              usage = {
+                prompt_tokens: estimatedTokens,
+                completion_tokens: estimatedTokens,
+                total_tokens: estimatedTokens * 2,
+              };
+            }
+
+            // Send final chunk
+            const finalChunk: CodeGenerationChunk = {
+              content: '',
+              accumulated,
+              reasoning_content: '',
+              isComplete: true,
+              usage: {
+                prompt_tokens: usage.prompt_tokens ?? 0,
+                completion_tokens: usage.completion_tokens ?? 0,
+                total_tokens: usage.total_tokens ?? 0,
+                time_cost: timeCost ?? 0,
+              },
+            };
+            options.onChunk!(finalChunk);
+            break;
+          }
+        }
+        content = accumulated;
+        debugProfileStats(
+          `streaming model, ${model}, mode, ${vlLocateMode() || 'default'}, cost-ms, ${timeCost}`,
+        );
+      } else {
+        const result = await completion.create({
+          model,
+          messages,
+          response_format: responseFormat,
+          ...commonConfig,
+        } as any);
+        timeCost = Date.now() - startTime;
+
+        debugProfileStats(
+          `model, ${model}, mode, ${vlLocateMode() || 'default'}, ui-tars-version, ${uiTarsModelVersion()}, prompt-tokens, ${result.usage?.prompt_tokens || ''}, completion-tokens, ${result.usage?.completion_tokens || ''}, total-tokens, ${result.usage?.total_tokens || ''}, cost-ms, ${timeCost}, requestId, ${result._request_id || ''}`,
+        );
+
+        debugProfileDetail(
+          `model usage detail: ${JSON.stringify(result.usage)}`,
+        );
+
+        assert(
+          result.choices,
+          `invalid response from LLM service: ${JSON.stringify(result)}`,
+        );
+        content = result.choices[0].message.content!;
+        usage = result.usage;
+      }
+
+      debugCall(`response: ${content}`);
+      assert(content, 'empty content');
+    } else if (style === 'anthropic') {
+      const convertImageContent = (content: any) => {
+        if (content.type === 'image_url') {
+          const imgBase64 = content.image_url.url;
+          assert(imgBase64, 'image_url is required');
+          return {
+            source: {
+              type: 'base64',
+              media_type: imgBase64.includes('data:image/png;base64,')
+                ? 'image/png'
+                : 'image/jpeg',
+              data: imgBase64.split(',')[1],
+            },
+            type: 'image',
+          };
+        }
+        return content;
+      };
+
+      if (isStreaming) {
+        const stream = (await completion.create({
+          model,
+          system: 'You are a versatile professional in software UI automation',
+          messages: messages.map((m) => ({
+            role: 'user',
+            content: Array.isArray(m.content)
+              ? (m.content as any).map(convertImageContent)
+              : m.content,
+          })),
+          response_format: responseFormat,
+          ...commonConfig,
+        } as any)) as any;
+
+        for await (const chunk of stream) {
+          const content = chunk.delta?.text || '';
+          if (content) {
+            accumulated += content;
+            const chunkData: CodeGenerationChunk = {
+              content,
+              accumulated,
+              reasoning_content: '',
+              isComplete: false,
+              usage: undefined,
+            };
+            options.onChunk!(chunkData);
+          }
+
+          // Check if stream is complete
+          if (chunk.type === 'message_stop') {
+            timeCost = Date.now() - startTime;
+            const anthropicUsage = chunk.usage;
+
+            // Send final chunk
+            const finalChunk: CodeGenerationChunk = {
+              content: '',
+              accumulated,
+              reasoning_content: '',
+              isComplete: true,
+              usage: anthropicUsage
+                ? {
+                    prompt_tokens: anthropicUsage.input_tokens ?? 0,
+                    completion_tokens: anthropicUsage.output_tokens ?? 0,
+                    total_tokens:
+                      (anthropicUsage.input_tokens ?? 0) +
+                      (anthropicUsage.output_tokens ?? 0),
+                    time_cost: timeCost ?? 0,
+                  }
+                : undefined,
+            };
+            options.onChunk!(finalChunk);
+            break;
+          }
+        }
+        content = accumulated;
+      } else {
+        const result = await completion.create({
+          model,
+          system: 'You are a versatile professional in software UI automation',
+          messages: messages.map((m) => ({
+            role: 'user',
+            content: Array.isArray(m.content)
+              ? (m.content as any).map(convertImageContent)
+              : m.content,
+          })),
+          response_format: responseFormat,
+          ...commonConfig,
+        } as any);
+        timeCost = Date.now() - startTime;
+        content = (result as any).content[0].text as string;
+        usage = result.usage;
+      }
+
+      assert(content, 'empty content');
+    }
+    // Ensure we always have usage info for streaming responses
+    if (isStreaming && !usage) {
+      // Estimate token counts based on content length (rough approximation)
+      const estimatedTokens = Math.max(
+        1,
+        Math.floor((content || '').length / 4),
+      );
+      usage = {
+        prompt_tokens: estimatedTokens,
+        completion_tokens: estimatedTokens,
+        total_tokens: estimatedTokens * 2,
+      };
     }
 
-    debugProfileStats(
-      `model, ${model}, mode, ${vlLocateMode() || 'default'}, prompt-tokens, ${result.usage?.prompt_tokens || ''}, completion-tokens, ${result.usage?.completion_tokens || ''}, total-tokens, ${result.usage?.total_tokens || ''}, cost-ms, ${Date.now() - startTime}, requestId, ${result._request_id || ''}`,
-    );
-
-    debugProfileDetail(`model usage detail: ${JSON.stringify(result.usage)}`);
-
-    assert(
-      result.choices,
-      `invalid response from LLM service: ${JSON.stringify(result)}`,
-    );
-    content = result.choices[0].message.content!;
-
-    debugCall(`response: ${content}`);
-    assert(content, 'empty content');
-    usage = result.usage;
-    // console.log('headers', result.headers);
-  } else if (style === 'anthropic') {
-    const convertImageContent = (content: any) => {
-      if (content.type === 'image_url') {
-        const imgBase64 = content.image_url.url;
-        assert(imgBase64, 'image_url is required');
-        return {
-          source: {
-            type: 'base64',
-            media_type: imgBase64.includes('data:image/png;base64,')
-              ? 'image/png'
-              : 'image/jpeg',
-            data: imgBase64.split(',')[1],
-          },
-          type: 'image',
-        };
-      }
-      return content;
+    return {
+      content: content || '',
+      usage: usage
+        ? {
+            prompt_tokens: usage.prompt_tokens ?? 0,
+            completion_tokens: usage.completion_tokens ?? 0,
+            total_tokens: usage.total_tokens ?? 0,
+            time_cost: timeCost ?? 0,
+          }
+        : undefined,
+      isStreamed: !!isStreaming,
     };
-
-    const result = await completion.create({
-      model,
-      system: 'You are a versatile professional in software UI automation',
-      messages: messages.map((m) => ({
-        role: 'user',
-        content: Array.isArray(m.content)
-          ? (m.content as any).map(convertImageContent)
-          : m.content,
-      })),
-      response_format: responseFormat,
-      ...commonConfig,
-    } as any);
-    content = (result as any).content[0].text as string;
-    assert(content, 'empty content');
-    usage = result.usage;
+  } catch (e: any) {
+    console.error(' call AI error', e);
+    const newError = new Error(
+      `failed to call ${isStreaming ? 'streaming ' : ''}AI model service: ${e.message}. Trouble shooting: https://midscenejs.com/model-provider.html`,
+      {
+        cause: e,
+      },
+    );
+    throw newError;
   }
-
-  return { content: content || '', usage };
 }
 
 export async function callToGetJSONObject<T>(
@@ -358,13 +547,12 @@ export async function callToGetJSONObject<T>(
       case AIActionType.INSPECT_ELEMENT:
         responseFormat = locatorSchema;
         break;
-      case AIActionType.EXTRACT_DATA:
-        //TODO: Currently the restriction type can only be a json subset of the constraint, and the way the extract api is used needs to be adjusted to limit the user's data to this as well
-        // targetResponseFormat = extractDataSchema;
-        responseFormat = { type: AIResponseFormat.JSON };
-        break;
       case AIActionType.PLAN:
         responseFormat = planSchema;
+        break;
+      case AIActionType.EXTRACT_DATA:
+      case AIActionType.DESCRIBE_ELEMENT:
+        responseFormat = { type: AIResponseFormat.JSON };
         break;
     }
   }
@@ -378,6 +566,14 @@ export async function callToGetJSONObject<T>(
   assert(response, 'empty response');
   const jsonContent = safeParseJson(response.content);
   return { content: jsonContent, usage: response.usage };
+}
+
+export async function callAiFnWithStringResponse<T>(
+  msgs: AIArgs,
+  AIActionTypeValue: AIActionType,
+): Promise<{ content: string; usage?: AIUsageInfo }> {
+  const { content, usage } = await call(msgs, AIActionTypeValue);
+  return { content, usage };
 }
 
 export function extractJSONFromCodeBlock(response: string) {
@@ -429,12 +625,12 @@ export function safeParseJson(input: string) {
     return JSON.parse(cleanJsonString);
   } catch {}
   try {
-    return dJSON.parse(cleanJsonString);
+    return JSON.parse(jsonrepair(cleanJsonString));
   } catch (e) {}
 
   if (vlLocateMode() === 'doubao-vision' || vlLocateMode() === 'vlm-ui-tars') {
     const jsonString = preprocessDoubaoBboxJson(cleanJsonString);
-    return dJSON.parse(jsonString);
+    return JSON.parse(jsonrepair(jsonString));
   }
   throw Error(`failed to parse json response: ${input}`);
 }

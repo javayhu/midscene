@@ -1,5 +1,15 @@
-import type { PlanningAction } from '@/types';
-import { uiTarsModelVersion } from '@midscene/shared/env';
+import type {
+  AIUsageInfo,
+  MidsceneYamlFlowItem,
+  PlanningAction,
+  Size,
+} from '@/types';
+import {
+  UITarsModelVersion,
+  uiTarsModelVersion,
+  vlLocateMode,
+} from '@midscene/shared/env';
+import { resizeImgBase64 } from '@midscene/shared/img';
 import { transformHotkeyInput } from '@midscene/shared/keyboard-layout';
 import { getDebug } from '@midscene/shared/logger';
 import { assert } from '@midscene/shared/utils';
@@ -18,7 +28,9 @@ type ActionType =
   | 'wait'
   | 'androidBackButton'
   | 'androidHomeButton'
-  | 'androidRecentAppsButton';
+  | 'androidRecentAppsButton'
+  | 'androidLongPress'
+  | 'androidPull';
 
 const debug = getDebug('ui-tars-planning');
 const bboxSize = 10;
@@ -41,8 +53,11 @@ export async function vlmPlanning(options: {
   size: { width: number; height: number };
 }): Promise<{
   actions: PlanningAction<any>[];
-  realActions: ReturnType<typeof actionParser>['parsed'];
+  actionsFromModel: ReturnType<typeof actionParser>['parsed'];
   action_summary: string;
+  yamlFlow?: MidsceneYamlFlowItem[];
+  usage?: AIUsageInfo;
+  rawResponse?: string;
 }> {
   const { conversationHistory, userInstruction, size } = options;
   const systemPrompt = getUiTarsPlanningPrompt() + userInstruction;
@@ -186,6 +201,42 @@ export async function vlmPlanning(options: {
         type: 'AndroidRecentAppsButton',
         param: {},
       });
+    } else if (action.action_type === 'androidLongPress') {
+      assert(
+        action.action_inputs.start_coords,
+        'start_coords is required for androidLongPress',
+      );
+      const point = action.action_inputs.start_coords;
+      transformActions.push({
+        type: 'AndroidLongPress',
+        param: {
+          x: point[0],
+          y: point[1],
+          duration: 1000,
+        },
+        locate: null,
+        thought: action.thought || '',
+      });
+    } else if (action.action_type === 'androidPull') {
+      const pullDirection = action.action_inputs.direction || 'down';
+      const startPoint = action.action_inputs.start_coords
+        ? {
+            x: action.action_inputs.start_coords[0],
+            y: action.action_inputs.start_coords[1],
+          }
+        : undefined;
+
+      transformActions.push({
+        type: 'AndroidPull',
+        param: {
+          direction: pullDirection as 'up' | 'down',
+          startPoint,
+          distance: (action.action_inputs as any).distance,
+          duration: (action.action_inputs as any).duration || 500,
+        },
+        locate: null,
+        thought: action.thought || '',
+      });
     }
   });
 
@@ -200,8 +251,10 @@ export async function vlmPlanning(options: {
 
   return {
     actions: transformActions,
-    realActions: parsed,
+    actionsFromModel: parsed,
     action_summary: getSummary(res.content),
+    usage: res.usage,
+    rawResponse: JSON.stringify(res.content, undefined, 2),
   };
 }
 
@@ -300,6 +353,14 @@ interface FinishedAction extends BaseAction {
   action_inputs: Record<string, never>;
 }
 
+interface AndroidLongPressAction extends BaseAction {
+  action_type: 'androidLongPress';
+  action_inputs: {
+    start_coords: [number, number]; // Coordinates for long press
+    duration?: number; // Duration in milliseconds
+  };
+}
+
 export type Action =
   | ClickAction
   | DragAction
@@ -307,4 +368,32 @@ export type Action =
   | HotkeyAction
   | ScrollAction
   | FinishedAction
-  | WaitAction;
+  | WaitAction
+  | AndroidLongPressAction;
+
+export async function resizeImageForUiTars(imageBase64: string, size: Size) {
+  if (
+    vlLocateMode() === 'vlm-ui-tars' &&
+    uiTarsModelVersion() === UITarsModelVersion.V1_5
+  ) {
+    debug('ui-tars-v1.5, will check image size', size);
+    const currentPixels = size.width * size.height;
+    const maxPixels = 16384 * 28 * 28; //
+    if (currentPixels > maxPixels) {
+      const resizeFactor = Math.sqrt(maxPixels / currentPixels);
+      const newWidth = Math.floor(size.width * resizeFactor);
+      const newHeight = Math.floor(size.height * resizeFactor);
+      debug(
+        'resize image for ui-tars, new width: %s, new height: %s',
+        newWidth,
+        newHeight,
+      );
+      const resizedImage = await resizeImgBase64(imageBase64, {
+        width: newWidth,
+        height: newHeight,
+      });
+      return resizedImage;
+    }
+  }
+  return imageBase64;
+}

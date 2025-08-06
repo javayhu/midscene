@@ -32,14 +32,14 @@ export function timeCostStrElement(timeCost?: number) {
   );
 }
 
-export const iconForStatus = (status: string): JSX.Element => {
+export const iconForStatus = (status: string) => {
   switch (status) {
     case 'finished':
     case 'passed':
     case 'success':
     case 'connected':
       return (
-        <span style={{ color: '#2B8243' }}>
+        <span style={{ color: '#00AD4B' }}>
           <CheckOutlined />
         </span>
       );

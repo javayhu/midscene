@@ -4,7 +4,7 @@ export interface ElementInfo {
   id: string;
   indexId: number;
   nodeHashId: string;
-  locator: string;
+  xpaths?: string[];
   attributes: {
     nodeType: NodeType;
     [key: string]: string;
@@ -13,6 +13,7 @@ export interface ElementInfo {
   content: string;
   rect: { left: number; top: number; width: number; height: number };
   center: [number, number];
+  isVisible: boolean;
 }
 
 export interface ElementNode {
@@ -20,12 +21,30 @@ export interface ElementNode {
   children: ElementNode[];
 }
 
-export { descriptionOfTree, traverseTree, treeToList } from './tree';
+export {
+  descriptionOfTree,
+  traverseTree,
+  treeToList,
+  truncateText,
+  trimAttributes,
+} from './tree';
 
 export { extractTextWithPosition as webExtractTextWithPosition } from './web-extractor';
-
-export { extractTextWithPosition as clientExtractTextWithPosition } from './client-extractor';
 
 export { extractTreeNode as webExtractNodeTree } from './web-extractor';
 
 export { extractTreeNodeAsString as webExtractNodeTreeAsString } from './web-extractor';
+
+export { setNodeHashCacheListOnWindow, getNodeFromCacheList } from './util';
+
+export {
+  getXpathsById,
+  getXpathsByPoint,
+  getNodeInfoByXpath,
+  getElementInfoByXpath,
+  getElementXpath,
+} from './locator';
+
+export { generateElementByPosition } from './dom-util';
+
+export { isNotContainerElement } from './dom-util';

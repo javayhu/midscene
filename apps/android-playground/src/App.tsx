@@ -9,6 +9,7 @@ import {
   PromptInput,
   type ReplayScriptsInfo,
   allScriptsFromDump,
+  cancelTask,
   getTaskProgress,
   globalThemeConfig,
   overrideServerConfig,
@@ -42,7 +43,7 @@ export default function App() {
   const [messageApi, contextHolder] = message.useMessage();
   const [connectionReady, setConnectionReady] = useState(false);
   const [result, setResult] = useState<PlaygroundResult | null>({
-    result: null,
+    result: undefined,
     dump: null,
     reportHTML: null,
     error: null,
@@ -320,7 +321,7 @@ export default function App() {
       }
 
       // handle the special case of aiAction type, extract script information
-      if (res?.dump) {
+      if (res?.dump && !['aiQuery', 'aiAssert'].includes(type)) {
         const info = allScriptsFromDump(res.dump);
         setReplayScriptsInfo(info);
         setReplayCounter((c) => c + 1);
@@ -353,10 +354,13 @@ export default function App() {
   };
 
   // handle stop button click
-  const handleStop = useCallback(() => {
+  const handleStop = useCallback(async () => {
     clearPollingInterval();
     setLoading(false);
     resetResult();
+    if (currentRequestIdRef.current) {
+      await cancelTask(currentRequestIdRef.current);
+    }
     messageApi.info('Operation stopped');
   }, [messageApi, clearPollingInterval]);
 
@@ -374,6 +378,7 @@ export default function App() {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
+                      justifyContent: 'space-between',
                       gap: '10px',
                     }}
                   >
@@ -398,7 +403,17 @@ export default function App() {
                           onStop={handleStop}
                         />
                       </div>
-                      <div className="result-container">
+                      <div
+                        className="result-container"
+                        style={
+                          result
+                            ? {}
+                            : {
+                                border: '1px solid #0000001f',
+                                borderRadius: '8px',
+                              }
+                        }
+                      >
                         <PlaygroundResultView
                           result={result}
                           loading={loading}

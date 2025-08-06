@@ -1,11 +1,17 @@
 import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
-
-import getDebug from 'debug';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import type Jimp from 'jimp';
 import type { Rect } from 'src/types';
+import { getDebug } from '../logger';
+import { ifInNode } from '../utils';
 import getJimp from './get-jimp';
-const debugImg = getDebug('img');
+import getPhoton from './get-photon';
+import getSharp from './get-sharp';
+
+const imgDebug = getDebug('img');
+
 /**
 /**
  * Saves a Base64-encoded image to a file
@@ -19,7 +25,6 @@ export async function saveBase64Image(options: {
   base64Data: string;
   outputPath: string;
 }): Promise<void> {
-  debugImg(`saveBase64Image start: ${options.outputPath}`);
   const { base64Data, outputPath } = options;
   // Remove the base64 data prefix (if any)
   const base64Image = base64Data.split(';base64,').pop() || base64Data;
@@ -31,7 +36,6 @@ export async function saveBase64Image(options: {
   const Jimp = await getJimp();
   const image = await Jimp.read(imageBuffer);
   await image.writeAsync(outputPath);
-  debugImg(`saveBase64Image done: ${options.outputPath}`);
 }
 
 /**
@@ -41,12 +45,10 @@ export async function saveBase64Image(options: {
  */
 export async function transformImgPathToBase64(inputPath: string) {
   // Use Jimp to process images and generate base64 data
-  debugImg(`transformImgPathToBase64 start: ${inputPath}`);
   const Jimp = await getJimp();
   const image = await Jimp.read(inputPath);
   const buffer = await image.getBufferAsync(Jimp.MIME_JPEG);
   const res = buffer.toString('base64');
-  debugImg(`transformImgPathToBase64 done: ${inputPath}`);
   return res;
 }
 
@@ -72,23 +74,80 @@ export async function resizeImg(
     'newSize must be positive',
   );
 
-  debugImg(`resizeImg start, target size: ${newSize.width}x${newSize.height}`);
-  const Jimp = await getJimp();
-  const image = await Jimp.read(inputData);
-  const { width, height } = image.bitmap;
+  const resizeStartTime = Date.now();
+  imgDebug(`resizeImg start, target size: ${newSize.width}x${newSize.height}`);
 
-  if (!width || !height) {
+  if (ifInNode) {
+    // Node.js environment: use Sharp
+    try {
+      const Sharp = await getSharp();
+      const metadata = await Sharp(inputData).metadata();
+      const { width: originalWidth, height: originalHeight } = metadata;
+
+      if (!originalWidth || !originalHeight) {
+        throw Error('Undefined width or height from the input image.');
+      }
+
+      if (
+        newSize.width === originalWidth &&
+        newSize.height === originalHeight
+      ) {
+        return inputData;
+      }
+
+      const resizedBuffer = await Sharp(inputData)
+        .resize(newSize.width, newSize.height)
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      const resizeEndTime = Date.now();
+      imgDebug(
+        `resizeImg done (Sharp), target size: ${newSize.width}x${newSize.height}, cost: ${resizeEndTime - resizeStartTime}ms`,
+      );
+
+      return resizedBuffer;
+    } catch (error) {
+      imgDebug('Sharp failed, falling back to Photon:', error);
+    }
+  }
+
+  // browser environment: use Photon
+  const { PhotonImage, SamplingFilter, resize } = await getPhoton();
+  const inputBytes = new Uint8Array(inputData);
+  const inputImage = PhotonImage.new_from_byteslice(inputBytes);
+  const originalWidth = inputImage.get_width();
+  const originalHeight = inputImage.get_height();
+
+  if (!originalWidth || !originalHeight) {
+    inputImage.free();
     throw Error('Undefined width or height from the input image.');
   }
 
-  if (newSize.width === width && newSize.height === height) {
+  if (newSize.width === originalWidth && newSize.height === originalHeight) {
+    inputImage.free();
     return inputData;
   }
 
-  image.resize(newSize.width, newSize.height, Jimp.RESIZE_BICUBIC);
-  image.quality(90);
-  const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-  debugImg(`resizeImg done, target size: ${newSize.width}x${newSize.height}`);
+  // Resize image using photon with bicubic-like sampling
+  const outputImage = resize(
+    inputImage,
+    newSize.width,
+    newSize.height,
+    SamplingFilter.CatmullRom,
+  );
+
+  const outputBytes = outputImage.get_bytes_jpeg(90);
+  const resizedBuffer = Buffer.from(outputBytes);
+
+  // Free memory
+  inputImage.free();
+  outputImage.free();
+
+  const resizeEndTime = Date.now();
+
+  imgDebug(
+    `resizeImg done (Photon), target size: ${newSize.width}x${newSize.height}, cost: ${resizeEndTime - resizeStartTime}ms`,
+  );
 
   return resizedBuffer;
 }
@@ -99,9 +158,7 @@ export async function bufferFromBase64(base64: string) {
   if (dataSplitted.length !== 2) {
     throw Error('Invalid base64 data');
   }
-  debugImg(`bufferFromBase64 start: ${base64}`);
   const res = Buffer.from(dataSplitted[1], 'base64');
-  debugImg(`bufferFromBase64 done: ${base64}`);
   return res;
 }
 
@@ -112,7 +169,6 @@ export async function resizeImgBase64(
     height: number;
   },
 ): Promise<string> {
-  debugImg(`resizeImgBase64 start: ${inputBase64}`);
   const splitFlag = ';base64,';
   const dataSplitted = inputBase64.split(splitFlag);
   if (dataSplitted.length !== 2) {
@@ -123,7 +179,6 @@ export async function resizeImgBase64(
   const buffer = await resizeImg(imageBuffer, newSize);
   const content = buffer.toString('base64');
   const res = `${dataSplitted[0]}${splitFlag}${content}`;
-  debugImg(`resizeImgBase64 done: ${inputBase64}`);
   return res;
 }
 
@@ -168,50 +223,6 @@ export function zoomForGPT4o(originalWidth: number, originalHeight: number) {
   };
 }
 
-/**
- * Trims an image and returns the trimming information, including the offset from the left and top edges, and the trimmed width and height
- *
- * @param image - The image to be trimmed. This can be a file path or a Buffer object containing the image data
- * @returns A Promise that resolves to an object containing the trimming information. If the image does not need to be trimmed, this object will be null
- */
-export async function trimImage(image: string | Buffer): Promise<{
-  trimOffsetLeft: number; // attention: trimOffsetLeft is a negative number
-  trimOffsetTop: number; // so as trimOffsetTop
-  width: number;
-  height: number;
-} | null> {
-  const Jimp = await getJimp();
-  const jimpImage = await Jimp.read(
-    Buffer.isBuffer(image) ? image : Buffer.from(image),
-  );
-  const { width, height } = jimpImage.bitmap;
-
-  if (width <= 3 || height <= 3) {
-    return null;
-  }
-
-  const trimmedImage = jimpImage.autocrop();
-  const { width: trimmedWidth, height: trimmedHeight } = trimmedImage.bitmap;
-
-  const trimOffsetLeft = (width - trimmedWidth) / 2;
-  const trimOffsetTop = (height - trimmedHeight) / 2;
-
-  if (trimOffsetLeft === 0 && trimOffsetTop === 0) {
-    return null;
-  }
-
-  return {
-    trimOffsetLeft: -trimOffsetLeft,
-    trimOffsetTop: -trimOffsetTop,
-    width: trimmedWidth,
-    height: trimmedHeight,
-  };
-}
-
-export function prependBase64Header(base64: string, mimeType = 'image/png') {
-  return `data:${mimeType};base64,${base64}`;
-}
-
 export async function jimpFromBase64(base64: string): Promise<Jimp> {
   const Jimp = await getJimp();
   const imageBuffer = await bufferFromBase64(base64);
@@ -223,7 +234,6 @@ export async function paddingToMatchBlock(
   image: Jimp,
   blockSize = 28,
 ): Promise<Jimp> {
-  debugImg('paddingToMatchBlock start');
   const { width, height } = image.bitmap;
 
   const targetWidth = Math.ceil(width / blockSize) * blockSize;
@@ -269,3 +279,63 @@ export async function jimpToBase64(image: Jimp): Promise<string> {
   const Jimp = await getJimp();
   return image.getBase64Async(Jimp.MIME_JPEG);
 }
+
+export const httpImg2Base64 = async (url: string): Promise<string> => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${url}`);
+  }
+  const contentType = response.headers.get('content-type');
+  if (!contentType) {
+    throw new Error(`Failed to fetch image: ${url}`);
+  }
+  assert(
+    contentType.startsWith('image/'),
+    `The url ${url} is not a image, because of content-type in header is ${contentType}.`,
+  );
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return `data:${contentType};base64,${buffer.toString('base64')}`;
+};
+
+/**
+ * Convert image file to base64 string
+ * Because this method is synchronous, the npm package `sharp` cannot be used to detect the file type.
+ * TODO: convert to webp to reduce base64 size.
+ */
+export const localImg2Base64 = (
+  imgPath: string,
+  withoutHeader = false,
+): string => {
+  const body = readFileSync(imgPath).toString('base64');
+  if (withoutHeader) {
+    return body;
+  }
+
+  // Detect image type by extname.
+  const type = path.extname(imgPath).slice(1);
+  const finalType = type === 'svg' ? 'svg+xml' : type || 'jpg';
+
+  return `data:image/${finalType};base64,${body}`;
+};
+
+/**
+ * PreProcess image url to ensure image is accessible to LLM.
+ * @param url - The url of the image, it can be a http url or a base64 string or a file path
+ * @param convertHttpImage2Base64 - Whether to convert http image to base64, if true, the http image will be converted to base64, otherwise, the http image will be returned as is
+ * @returns The base64 string of the image (when convertHttpImage2Base64 is true or url is a file path) or the http image url
+ */
+export const preProcessImageUrl = async (
+  url: string,
+  convertHttpImage2Base64: boolean,
+) => {
+  if (url.startsWith('data:')) {
+    return url;
+  } else if (url.startsWith('http://') || url.startsWith('https://')) {
+    if (!convertHttpImage2Base64) {
+      return url;
+    }
+    return await httpImg2Base64(url);
+  } else {
+    return await localImg2Base64(url);
+  }
+};

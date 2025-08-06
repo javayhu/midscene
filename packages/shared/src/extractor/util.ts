@@ -1,7 +1,7 @@
+import type { Rect } from '../types';
 import { generateHashId } from '../utils';
 import { extractTextWithPosition } from './web-extractor';
 
-// import { TEXT_MAX_SIZE } from './constants';
 const MAX_VALUE_LENGTH = 300;
 let debugMode = false;
 
@@ -20,48 +20,11 @@ export function logger(..._msg: any[]): void {
   console.log(..._msg);
 }
 
-// const nodeIndexCounter = 0;
-
-const taskIdKey = '_midscene_retrieve_task_id';
-// const nodeDataIdKey = 'data-midscene-task-';
-// const nodeIndexKey = '_midscene_retrieve_node_index';
-
-function selectorForValue(val: number | string): string {
-  return `[${taskIdKey}='${val}']`;
-}
-
-export function setDataForNode(
-  node: globalThis.HTMLElement | globalThis.Node,
-  nodeHash: string,
-  setToParentNode: boolean, // should be false for default
-  currentWindow: typeof globalThis.window,
-): string {
-  const taskId = taskIdKey;
-  if (!(node instanceof currentWindow.HTMLElement)) {
-    return '';
-  }
-  if (!taskId) {
-    console.error('No task id found');
-    return '';
-  }
-
-  const selector = selectorForValue(nodeHash);
-  if (getDebugMode()) {
-    if (setToParentNode) {
-      if (node.parentNode instanceof currentWindow.HTMLElement) {
-        node.parentNode.setAttribute(taskIdKey, nodeHash.toString());
-      }
-    } else {
-      node.setAttribute(taskIdKey, nodeHash.toString());
-    }
-  }
-  return selector;
-}
-
-function isElementPartiallyInViewport(
+export function isElementPartiallyInViewport(
   rect: ReturnType<typeof getRect>,
   currentWindow: typeof window,
   currentDocument: typeof document,
+  visibleAreaRatio: number = 2 / 3,
 ) {
   const elementHeight = rect.height;
   const elementWidth = rect.width;
@@ -90,7 +53,7 @@ function isElementPartiallyInViewport(
   const visibleArea = overlapRect.width * overlapRect.height;
   const totalArea = elementHeight * elementWidth;
   // return visibleArea > 30 * 30 || visibleArea / totalArea >= 2 / 3;
-  return visibleArea / totalArea >= 2 / 3;
+  return visibleArea / totalArea >= visibleAreaRatio;
 }
 
 export function getPseudoElementContent(
@@ -255,13 +218,20 @@ const isElementCovered = (
   // return topElement !== el && !el.contains(topElement);
 };
 
-export function visibleRect(
+export function elementRect(
   el: globalThis.HTMLElement | globalThis.Node | null,
   currentWindow: typeof globalThis.window,
   currentDocument: typeof globalThis.document,
   baseZoom = 1,
 ):
-  | { left: number; top: number; width: number; height: number; zoom: number }
+  | {
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+      zoom: number;
+      isVisible: boolean;
+    }
   | false {
   if (!el) {
     logger(el, 'Element is not in the DOM hierarchy');
@@ -302,31 +272,11 @@ export function visibleRect(
     return false;
   }
 
-  const scrollLeft =
-    currentWindow.pageXOffset || currentDocument.documentElement.scrollLeft;
-  const scrollTop =
-    currentWindow.pageYOffset || currentDocument.documentElement.scrollTop;
-  const viewportWidth =
-    currentWindow.innerWidth || currentDocument.documentElement.clientWidth;
-  const viewportHeight =
-    currentWindow.innerHeight || currentDocument.documentElement.clientHeight;
-
-  const isPartiallyInViewport = isElementPartiallyInViewport(
+  const isVisible = isElementPartiallyInViewport(
     rect,
     currentWindow,
     currentDocument,
   );
-
-  if (!isPartiallyInViewport) {
-    logger(el, 'Element is completely outside the viewport', {
-      rect,
-      viewportHeight,
-      viewportWidth,
-      scrollTop,
-      scrollLeft,
-    });
-    return false;
-  }
 
   // check if the element is hidden by an ancestor
   let parent: HTMLElement | Node | null = el;
@@ -384,6 +334,7 @@ export function visibleRect(
     width: Math.round(rect.width),
     height: Math.round(rect.height),
     zoom: rect.zoom,
+    isVisible,
   };
 }
 
@@ -444,12 +395,44 @@ export function getNodeAttributes(
 export function midsceneGenerateHash(
   node: globalThis.Node | null,
   content: string,
-  rect: any,
+  rect: Rect,
 ): string {
   const slicedHash = generateHashId(rect, content);
 
+  if (node) {
+    if (!(window as any).midsceneNodeHashCacheList) {
+      setNodeHashCacheListOnWindow();
+    }
+
+    setNodeToCacheList(node, slicedHash);
+  }
+
   // Returns the first 10 characters as a short hash
   return slicedHash;
+}
+
+export function setNodeHashCacheListOnWindow() {
+  if (typeof window !== 'undefined') {
+    (window as any).midsceneNodeHashCacheList = [];
+  }
+}
+
+export function setNodeToCacheList(node: globalThis.Node, id: string) {
+  if (typeof window !== 'undefined') {
+    if (getNodeFromCacheList(id)) {
+      return;
+    }
+    (window as any).midsceneNodeHashCacheList?.push({ node, id });
+  }
+}
+
+export function getNodeFromCacheList(id: string) {
+  if (typeof window !== 'undefined') {
+    return (window as any).midsceneNodeHashCacheList?.find(
+      (item: { node: Node; id: string }) => item.id === id,
+    )?.node;
+  }
+  return null;
 }
 
 export function generateId(numberId: number) {
@@ -469,7 +452,7 @@ export function setGenerateHashOnWindow() {
 
 export function setMidsceneVisibleRectOnWindow() {
   if (typeof window !== 'undefined') {
-    (window as any).midsceneVisibleRect = visibleRect;
+    (window as any).midsceneVisibleRect = elementRect;
   }
 }
 

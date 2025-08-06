@@ -1,3 +1,7 @@
+declare global {
+  var midsceneGlobalConfig: Partial<ReturnType<typeof allConfigFromEnv>> | null;
+}
+
 // config keys
 export const MIDSCENE_OPENAI_INIT_CONFIG_JSON =
   'MIDSCENE_OPENAI_INIT_CONFIG_JSON';
@@ -10,7 +14,7 @@ export const MIDSCENE_DANGEROUSLY_PRINT_ALL_CONFIG =
 export const MIDSCENE_DEBUG_MODE = 'MIDSCENE_DEBUG_MODE';
 export const MIDSCENE_MCP_USE_PUPPETEER_MODE =
   'MIDSCENE_MCP_USE_PUPPETEER_MODE';
-
+export const MIDSCENE_MCP_ANDROID_MODE = 'MIDSCENE_MCP_ANDROID_MODE';
 export const MIDSCENE_FORCE_DEEP_THINK = 'MIDSCENE_FORCE_DEEP_THINK';
 
 export const MIDSCENE_OPENAI_SOCKS_PROXY = 'MIDSCENE_OPENAI_SOCKS_PROXY';
@@ -20,6 +24,9 @@ export const OPENAI_BASE_URL = 'OPENAI_BASE_URL';
 export const OPENAI_MAX_TOKENS = 'OPENAI_MAX_TOKENS';
 
 export const MIDSCENE_ADB_PATH = 'MIDSCENE_ADB_PATH';
+export const MIDSCENE_ADB_REMOTE_HOST = 'MIDSCENE_ADB_REMOTE_HOST';
+export const MIDSCENE_ADB_REMOTE_PORT = 'MIDSCENE_ADB_REMOTE_PORT';
+export const MIDSCENE_ANDROID_IME_STRATEGY = 'MIDSCENE_ANDROID_IME_STRATEGY';
 
 export const MIDSCENE_CACHE = 'MIDSCENE_CACHE';
 export const MIDSCENE_USE_VLM_UI_TARS = 'MIDSCENE_USE_VLM_UI_TARS';
@@ -31,10 +38,18 @@ export const MATCH_BY_POSITION = 'MATCH_BY_POSITION';
 export const MIDSCENE_API_TYPE = 'MIDSCENE-API-TYPE';
 export const MIDSCENE_REPORT_TAG_NAME = 'MIDSCENE_REPORT_TAG_NAME';
 
+export const MIDSCENE_REPLANNING_CYCLE_LIMIT =
+  'MIDSCENE_REPLANNING_CYCLE_LIMIT';
+
+export const MIDSCENE_PREFERRED_LANGUAGE = 'MIDSCENE_PREFERRED_LANGUAGE';
+
 export const MIDSCENE_USE_AZURE_OPENAI = 'MIDSCENE_USE_AZURE_OPENAI';
 export const MIDSCENE_AZURE_OPENAI_SCOPE = 'MIDSCENE_AZURE_OPENAI_SCOPE';
 export const MIDSCENE_AZURE_OPENAI_INIT_CONFIG_JSON =
   'MIDSCENE_AZURE_OPENAI_INIT_CONFIG_JSON';
+
+export const MIDSCENE_CACHE_MAX_FILENAME_LENGTH =
+  'MIDSCENE_CACHE_MAX_FILENAME_LENGTH';
 
 export const AZURE_OPENAI_ENDPOINT = 'AZURE_OPENAI_ENDPOINT';
 export const AZURE_OPENAI_KEY = 'AZURE_OPENAI_KEY';
@@ -51,6 +66,8 @@ export const OPENAI_USE_AZURE = 'OPENAI_USE_AZURE';
 
 export const allConfigFromEnv = () => {
   return {
+    [MIDSCENE_MCP_ANDROID_MODE]:
+      process.env[MIDSCENE_MCP_ANDROID_MODE] || undefined,
     [MIDSCENE_OPENAI_INIT_CONFIG_JSON]:
       process.env[MIDSCENE_OPENAI_INIT_CONFIG_JSON] || undefined,
     [MIDSCENE_MODEL_NAME]: process.env[MIDSCENE_MODEL_NAME] || undefined,
@@ -70,6 +87,12 @@ export const allConfigFromEnv = () => {
     [OPENAI_MAX_TOKENS]: process.env[OPENAI_MAX_TOKENS] || undefined,
     [OPENAI_USE_AZURE]: process.env[OPENAI_USE_AZURE] || undefined,
     [MIDSCENE_ADB_PATH]: process.env[MIDSCENE_ADB_PATH] || undefined,
+    [MIDSCENE_ADB_REMOTE_HOST]:
+      process.env[MIDSCENE_ADB_REMOTE_HOST] || undefined,
+    [MIDSCENE_ADB_REMOTE_PORT]:
+      process.env[MIDSCENE_ADB_REMOTE_PORT] || undefined,
+    [MIDSCENE_ANDROID_IME_STRATEGY]:
+      process.env[MIDSCENE_ANDROID_IME_STRATEGY] || undefined,
     [MIDSCENE_CACHE]: process.env[MIDSCENE_CACHE] || undefined,
     [MATCH_BY_POSITION]: process.env[MATCH_BY_POSITION] || undefined,
     [MIDSCENE_REPORT_TAG_NAME]:
@@ -103,16 +126,20 @@ export const allConfigFromEnv = () => {
     [MIDSCENE_MCP_USE_PUPPETEER_MODE]:
       process.env[MIDSCENE_MCP_USE_PUPPETEER_MODE] || undefined,
     [MIDSCENE_RUN_DIR]: process.env[MIDSCENE_RUN_DIR] || undefined,
+    [MIDSCENE_PREFERRED_LANGUAGE]:
+      process.env[MIDSCENE_PREFERRED_LANGUAGE] || undefined,
+    [MIDSCENE_REPLANNING_CYCLE_LIMIT]:
+      process.env[MIDSCENE_REPLANNING_CYCLE_LIMIT] || undefined,
+    [MIDSCENE_CACHE_MAX_FILENAME_LENGTH]:
+      process.env[MIDSCENE_CACHE_MAX_FILENAME_LENGTH] || undefined,
   };
 };
 
-let globalConfig: Partial<ReturnType<typeof allConfigFromEnv>> | null = null;
-
 const getGlobalConfig = () => {
-  if (globalConfig === null) {
-    globalConfig = allConfigFromEnv();
+  if (!globalThis.midsceneGlobalConfig) {
+    globalThis.midsceneGlobalConfig = allConfigFromEnv();
   }
-  return globalConfig;
+  return globalThis.midsceneGlobalConfig;
 };
 
 // import { UITarsModelVersion } from '@ui-tars/shared/constants';
@@ -192,7 +219,11 @@ export const getAIConfig = (
     );
   }
 
-  return getGlobalConfig()[configKey]?.trim();
+  const value = getGlobalConfig()[configKey];
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  return value;
 };
 
 export const getAIConfigInBoolean = (
@@ -206,6 +237,13 @@ export const getAIConfigInBoolean = (
     return false;
   }
   return !!config.trim();
+};
+
+export const getAIConfigInNumber = (
+  configKey: keyof ReturnType<typeof allConfigFromEnv>,
+) => {
+  const config = getAIConfig(configKey) || '';
+  return Number(config);
 };
 
 export const getAIConfigInJson = (
@@ -240,7 +278,17 @@ export const overrideAIConfig = (
   }
 
   const currentConfig = getGlobalConfig();
-  globalConfig = extendMode
+  globalThis.midsceneGlobalConfig = extendMode
     ? { ...currentConfig, ...newConfig }
     : { ...newConfig };
+};
+
+export const getPreferredLanguage = () => {
+  if (getAIConfig(MIDSCENE_PREFERRED_LANGUAGE)) {
+    return getAIConfig(MIDSCENE_PREFERRED_LANGUAGE);
+  }
+
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const isChina = timeZone === 'Asia/Shanghai';
+  return isChina ? 'Chinese' : 'English';
 };

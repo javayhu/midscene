@@ -5,11 +5,16 @@ on:
       version:
         description: 'Release Version(minor,patch,preminor,prepatch)'
         required: true
-        default: 'patch'
+        default: 'prepatch'
       branch:
         description: 'Release Branch(confirm release branch)'
         required: true
         default: 'main'
+
+# Add permissions for creating releases
+permissions:
+  contents: write
+  packages: write
 
 jobs:
   release:
@@ -55,7 +60,14 @@ jobs:
       run: node ./scripts/release.js --version=${{ github.event.inputs.version }}
       env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          
+    
+    - name: Get version from core package
+      id: get_version
+      run: |
+        VERSION=$(cat packages/core/package.json | jq -r '.version')
+        echo "version=v${VERSION}" >> $GITHUB_OUTPUT
+        echo "Core package version: v${VERSION}"
+      
     - name: Upload output
       uses: actions/upload-artifact@v4
       with:
@@ -63,3 +75,12 @@ jobs:
         name: chrome_extension
         path: ${{ github.workspace }}/apps/chrome-extension/extension_output
         
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v2
+      if: ${{ !contains(steps.get_version.outputs.version, 'beta') && !contains(steps.get_version.outputs.version, 'alpha') }}
+      with:
+        tag_name: ${{ steps.get_version.outputs.version }}
+        files: |
+          ${{ github.workspace }}/apps/chrome-extension/extension_output/**/*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

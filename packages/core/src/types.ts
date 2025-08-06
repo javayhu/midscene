@@ -1,54 +1,33 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { NodeType } from '@midscene/shared/constants';
+import type {
+  BaseElement,
+  ElementTreeNode,
+  Rect,
+  Size,
+} from '@midscene/shared/types';
 import type { ChatCompletionMessageParam } from 'openai/resources';
-import type { DetailedLocateParam, scrollParam } from './yaml';
+import type {
+  DetailedLocateParam,
+  MidsceneYamlFlowItem,
+  scrollParam,
+} from './yaml';
 
+export type {
+  ElementTreeNode,
+  BaseElement,
+  Rect,
+  Size,
+  Point,
+} from '@midscene/shared/types';
 export * from './yaml';
 
-export interface Point {
-  left: number;
-  top: number;
-}
-
-export interface Size {
-  width: number; // device independent window size
-  height: number;
-  dpr?: number; // the scale factor of the screenshots
-}
-
-export type Rect = Point & Size & { zoom?: number };
-
-export abstract class BaseElement {
-  abstract id: string;
-
-  abstract indexId?: number; // markerId for web
-
-  abstract attributes: {
-    nodeType: NodeType;
-    [key: string]: string;
-  };
-
-  abstract content: string;
-
-  abstract rect: Rect;
-
-  abstract center: [number, number];
-
-  abstract locator?: string;
-}
-
-export interface ElementTreeNode<
-  ElementType extends BaseElement = BaseElement,
-> {
-  node: ElementType | null;
-  children: ElementTreeNode<ElementType>[];
-}
-
 export type AIUsageInfo = Record<string, any> & {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
+  prompt_tokens: number | undefined;
+  completion_tokens: number | undefined;
+  total_tokens: number | undefined;
+  time_cost: number | undefined;
 };
 
 /**
@@ -64,6 +43,7 @@ export type AISingleElementResponseById = {
   id: string;
   reason?: string;
   text?: string;
+  xpaths?: string[];
 };
 
 export type AISingleElementResponseByPosition = {
@@ -82,13 +62,16 @@ export interface AIElementLocatorResponse {
     id: string;
     reason?: string;
     text?: string;
+    xpaths?: string[];
   }[];
   bbox?: [number, number, number, number];
+  isOrderSensitive?: boolean;
   errors?: string[];
 }
 
 export interface AIElementCoordinatesResponse {
   bbox: [number, number, number, number];
+  isOrderSensitive?: boolean;
   errors?: string[];
 }
 
@@ -96,9 +79,10 @@ export type AIElementResponse =
   | AIElementLocatorResponse
   | AIElementCoordinatesResponse;
 
-export interface AIDataExtractionResponse<DataShape> {
-  data: DataShape;
+export interface AIDataExtractionResponse<DataDemand> {
+  data: DataDemand;
   errors?: string[];
+  thought?: string;
 }
 
 export interface AISectionLocatorResponse {
@@ -112,15 +96,34 @@ export interface AIAssertionResponse {
   thought: string;
 }
 
+export interface AIDescribeElementResponse {
+  description: string;
+  error?: string;
+}
+
+export interface LocatorValidatorOption {
+  centerDistanceThreshold?: number;
+}
+
+export interface LocateValidatorResult {
+  pass: boolean;
+  rect: Rect;
+  center: [number, number];
+  centerDistance?: number;
+}
+
+export interface AgentDescribeElementAtPointResult {
+  prompt: string;
+  deepThink: boolean;
+  verifyResult?: LocateValidatorResult;
+}
+
 /**
  * context
  */
 
 export abstract class UIContext<ElementType extends BaseElement = BaseElement> {
   abstract screenshotBase64: string;
-
-  // @deprecated('use tree instead')
-  abstract content: ElementType[];
 
   abstract tree: ElementTreeNode<ElementType>;
 
@@ -140,17 +143,9 @@ export interface InsightOptions {
   aiVendorFn?: CallAIFn;
 }
 
-// export interface UISection {
-//   name: string;
-//   description: string;
-//   sectionCharacteristics: string;
-//   rect: Rect;
-//   content: BaseElement[];
-// }
-
 export type EnsureObject<T> = { [K in keyof T]: any };
 
-export type InsightAction = 'locate' | 'extract' | 'assert';
+export type InsightAction = 'locate' | 'extract' | 'assert' | 'describe';
 
 export type InsightExtractParam = string | Record<string, string>;
 
@@ -159,6 +154,12 @@ export type LocateResultElement = {
   indexId?: number;
   center: [number, number];
   rect: Rect;
+  xpaths: string[];
+  attributes: {
+    nodeType: NodeType;
+    [key: string]: string;
+  };
+  isOrderSensitive?: boolean;
 };
 
 export interface LocateResult {
@@ -192,11 +193,10 @@ export interface InsightDump extends DumpMeta {
   type: 'locate' | 'extract' | 'assert';
   logId: string;
   userQuery: {
-    element?: string;
+    element?: TUserPrompt;
     dataDemand?: InsightExtractParam;
-    assertion?: string;
+    assertion?: TUserPrompt;
   };
-  quickAnswer?: Partial<AISingleElementResponse> | null;
   matchedElement: BaseElement[];
   matchedRect?: Rect;
   deepThink?: boolean;
@@ -259,8 +259,9 @@ export interface PlanningAction<ParamType = any> {
   type:
     | 'Locate'
     | 'Tap'
-    | 'Drag'
+    | 'RightClick'
     | 'Hover'
+    | 'Drag'
     | 'Input'
     | 'KeyboardPress'
     | 'Scroll'
@@ -272,8 +273,9 @@ export interface PlanningAction<ParamType = any> {
     | 'Finished'
     | 'AndroidBackButton'
     | 'AndroidHomeButton'
-    | 'AndroidRecentAppsButton';
-
+    | 'AndroidRecentAppsButton'
+    | 'AndroidLongPress'
+    | 'AndroidPull';
   param: ParamType;
   locate?: PlanningLocateParam | null;
 }
@@ -287,6 +289,8 @@ export interface PlanningAIResponse {
   error?: string;
   usage?: AIUsageInfo;
   rawResponse?: string;
+  yamlFlow?: MidsceneYamlFlowItem[];
+  yamlString?: string;
 }
 
 // export interface PlanningFurtherPlan {
@@ -297,14 +301,16 @@ export interface PlanningAIResponse {
 
 export type PlanningActionParamTap = null;
 export type PlanningActionParamHover = null;
+export type PlanningActionParamRightClick = null;
 export interface PlanningActionParamInputOrKeyPress {
   value: string;
+  autoDismissKeyboard?: boolean;
 }
 
 export type PlanningActionParamScroll = scrollParam;
 
 export interface PlanningActionParamAssert {
-  assertion: string;
+  assertion: TUserPrompt;
 }
 
 export interface PlanningActionParamSleep {
@@ -318,6 +324,19 @@ export interface PlanningActionParamError {
 export type PlanningActionParamWaitFor = AgentWaitForOpt & {
   assertion: string;
 };
+
+export interface PlanningActionParamAndroidLongPress {
+  x: number;
+  y: number;
+  duration?: number;
+}
+
+export interface PlanningActionParamAndroidPull {
+  direction: 'up' | 'down';
+  startPoint?: { x: number; y: number };
+  distance?: number;
+  duration?: number;
+}
 /**
  * misc
  */
@@ -351,15 +370,16 @@ export interface ExecutionRecorderItem {
   timing?: string;
 }
 
-export type ExecutionTaskType = 'Planning' | 'Insight' | 'Action' | 'Assertion';
+export type ExecutionTaskType =
+  | 'Planning'
+  | 'Insight'
+  | 'Action'
+  | 'Assertion'
+  | 'Log';
 
 export interface ExecutorContext {
   task: ExecutionTask;
   element?: LocateResultElement | null;
-}
-
-export interface TaskCacheInfo {
-  hit: boolean;
 }
 
 export interface ExecutionTaskApply<
@@ -373,7 +393,6 @@ export interface ExecutionTaskApply<
   param?: TaskParam;
   thought?: string;
   locate?: PlanningLocateParam | null;
-  quickAnswer?: AISingleElementResponse | null;
   pageContext?: UIContext;
   executor: (
     param: TaskParam,
@@ -384,11 +403,16 @@ export interface ExecutionTaskApply<
     | void;
 }
 
+export interface ExecutionTaskHitBy {
+  from: string;
+  context: Record<string, any>;
+}
+
 export interface ExecutionTaskReturn<TaskOutput = unknown, TaskLog = unknown> {
   output?: TaskOutput;
   log?: TaskLog;
   recorder?: ExecutionRecorderItem[];
-  cache?: TaskCacheInfo;
+  hitBy?: ExecutionTaskHitBy;
 }
 
 export type ExecutionTask<
@@ -407,13 +431,13 @@ export type ExecutionTask<
       : unknown
   > & {
     status: 'pending' | 'running' | 'finished' | 'failed' | 'cancelled';
-    error?: string;
+    error?: Error;
+    errorMessage?: string;
     errorStack?: string;
     timing?: {
       start: number;
       end?: number;
       cost?: number;
-      aiCost?: number;
     };
     usage?: AIUsageInfo;
   };
@@ -498,6 +522,18 @@ export type ExecutionTaskActionApply<ActionParam = any> = ExecutionTaskApply<
 export type ExecutionTaskAction = ExecutionTask<ExecutionTaskActionApply>;
 
 /*
+task - Log
+*/
+
+export type ExecutionTaskLogApply<
+  LogParam = {
+    content: string;
+  },
+> = ExecutionTaskApply<'Log', LogParam, void, void>;
+
+export type ExecutionTaskLog = ExecutionTask<ExecutionTaskLogApply>;
+
+/*
 task - planning
 */
 
@@ -527,3 +563,62 @@ export type PageType =
   | 'static'
   | 'chrome-extension-proxy'
   | 'android';
+
+export interface StreamingCodeGenerationOptions {
+  /** Whether to enable streaming output */
+  stream?: boolean;
+  /** Callback function to handle streaming chunks */
+  onChunk?: StreamingCallback;
+  /** Callback function to handle streaming completion */
+  onComplete?: (finalCode: string) => void;
+  /** Callback function to handle streaming errors */
+  onError?: (error: Error) => void;
+}
+
+export type StreamingCallback = (chunk: CodeGenerationChunk) => void;
+
+export interface CodeGenerationChunk {
+  /** The incremental content chunk */
+  content: string;
+  /** The reasoning content */
+  reasoning_content: string;
+  /** The accumulated content so far */
+  accumulated: string;
+  /** Whether this is the final chunk */
+  isComplete: boolean;
+  /** Token usage information if available */
+  usage?: AIUsageInfo;
+}
+
+export interface StreamingAIResponse {
+  /** The final accumulated content */
+  content: string;
+  /** Token usage information */
+  usage?: AIUsageInfo;
+  /** Whether the response was streamed */
+  isStreamed: boolean;
+}
+
+export type TMultimodalPrompt = {
+  /**
+   * Support use image to inspect elements.
+   * The "images" field is an object that uses image name as key and image url as value.
+   * The image url can be a local path, a http link , or a base64 string.
+   */
+  images?: {
+    name: string;
+    url: string;
+  }[];
+  /**
+   * By default, the image url in the "images" filed starts with `https://` or `http://` will be directly sent to the LLM.
+   * In case the images are not accessible to the LLM (One common case is that image url is internal network only.), you can enable this option.
+   * Then image will be download and convert to base64 format.
+   */
+  convertHttpImage2Base64?: boolean;
+};
+
+export type TUserPrompt =
+  | string
+  | ({
+      prompt: string;
+    } & Partial<TMultimodalPrompt>);

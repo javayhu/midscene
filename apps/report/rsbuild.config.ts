@@ -5,6 +5,7 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginLess } from '@rsbuild/plugin-less';
 import { pluginNodePolyfill } from '@rsbuild/plugin-node-polyfill';
 import { pluginReact } from '@rsbuild/plugin-react';
+import { pluginSvgr } from '@rsbuild/plugin-svgr';
 
 // Read all JSON files from test-data directory
 const testDataDir = path.join(__dirname, 'test-data');
@@ -136,6 +137,7 @@ export default defineConfig({
           },
         },
       },
+      externals: ['sharp'],
     },
   },
   output: {
@@ -146,6 +148,7 @@ export default defineConfig({
     pluginReact(),
     pluginLess(),
     pluginNodePolyfill(),
+    pluginSvgr(),
     copyReportTemplate(),
   ],
 });

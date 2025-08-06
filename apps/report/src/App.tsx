@@ -1,13 +1,11 @@
 import './App.less';
-import './index.less';
 
-import { CaretRightOutlined } from '@ant-design/icons';
-import { Button, ConfigProvider, Empty, Spin } from 'antd';
-import { useEffect, useRef, useState } from 'react';
+import { Alert, ConfigProvider, Empty } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
+import { antiEscapeScriptTag } from '@midscene/shared/utils';
 import { Logo, Player, globalThemeConfig } from '@midscene/visualizer';
-import { PlaywrightCaseSelector } from './components/PlaywrightCaseSelector';
 import DetailPanel from './components/detail-panel';
 import DetailSide from './components/detail-side';
 import GlobalHoverPreview from './components/global-hover-preview';
@@ -22,16 +20,14 @@ import type {
 
 let globalRenderCount = 1;
 
-export function Visualizer(props: VisualizerProps): JSX.Element {
+function Visualizer(props: VisualizerProps): JSX.Element {
   const { dumps } = props;
 
   const executionDump = useExecutionDump((store: StoreState) => store.dump);
   const executionDumpLoadId = useExecutionDump(
     (store: StoreState) => store._executionDumpLoadId,
   );
-  const replayAllMode = useExecutionDump(
-    (store: StoreState) => store.replayAllMode,
-  );
+
   const setReplayAllMode = useExecutionDump(
     (store: StoreState) => store.setReplayAllMode,
   );
@@ -44,15 +40,20 @@ export function Visualizer(props: VisualizerProps): JSX.Element {
   const insightHeight = useExecutionDump(
     (store: StoreState) => store.insightHeight,
   );
+  const replayAllMode = useExecutionDump(
+    (store: StoreState) => store.replayAllMode,
+  );
   const setGroupedDump = useExecutionDump(
     (store: StoreState) => store.setGroupedDump,
   );
+  const sdkVersion = useExecutionDump((store) => store.sdkVersion);
+  const modelName = useExecutionDump((store) => store.modelName);
+  const modelDescription = useExecutionDump((store) => store.modelDescription);
   const reset = useExecutionDump((store: StoreState) => store.reset);
   const [mainLayoutChangeFlag, setMainLayoutChangeFlag] = useState(0);
   const mainLayoutChangedRef = useRef(false);
   const dump = useExecutionDump((store: StoreState) => store.dump);
-
-  const [loading, setLoading] = useState(false);
+  const [proModeEnabled, setProModeEnabled] = useState(false);
 
   useEffect(() => {
     if (dumps) {
@@ -81,21 +82,6 @@ export function Visualizer(props: VisualizerProps): JSX.Element {
       window.removeEventListener('resize', onResize);
     };
   }, []);
-
-  if (loading) {
-    return (
-      <div
-        style={{
-          height: '100%',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-        }}
-      >
-        <Spin size="large" tip="Loading visualizer components..." />
-      </div>
-    );
-  }
 
   let mainContent: JSX.Element;
   if (dump && dump.executions.length === 0) {
@@ -141,7 +127,7 @@ export function Visualizer(props: VisualizerProps): JSX.Element {
             <DetailPanel />
           </div>
         </Panel>
-        <PanelResizeHandle />
+        <PanelResizeHandle className="resize-handle" />
         <Panel maxSize={95}>
           <div className="main-side">
             <DetailSide />
@@ -160,12 +146,24 @@ export function Visualizer(props: VisualizerProps): JSX.Element {
           }
         }}
       >
-        <Panel maxSize={95} defaultSize={20}>
+        <Panel maxSize={95} defaultSize={25}>
           <div className="page-side">
-            <Sidebar />
+            <Sidebar
+              dumps={dumps}
+              selectedDump={executionDump}
+              onDumpSelect={(dump) => {
+                setGroupedDump(dump);
+              }}
+              proModeEnabled={proModeEnabled}
+              onProModeChange={setProModeEnabled}
+              replayAllScripts={replayAllScripts}
+              replayAllMode={replayAllMode}
+              setReplayAllMode={setReplayAllMode}
+            />
           </div>
         </Panel>
         <PanelResizeHandle
+          className="resize-handle"
           onDragging={(isChanging) => {
             if (mainLayoutChangedRef.current && !isChanging) {
               setMainLayoutChangeFlag((prev) => prev + 1);
@@ -173,8 +171,9 @@ export function Visualizer(props: VisualizerProps): JSX.Element {
             mainLayoutChangedRef.current = isChanging;
           }}
         />
-        <Panel defaultSize={80} maxSize={95}>
+        <Panel defaultSize={75} maxSize={95}>
           <div className="main-right">
+            <div className="main-right-header">Record</div>
             <Timeline key={mainLayoutChangeFlag} />
             <div className="main-content">{content}</div>
           </div>
@@ -216,9 +215,6 @@ export function Visualizer(props: VisualizerProps): JSX.Element {
 
   return (
     <ConfigProvider theme={globalThemeConfig()}>
-      {/* <Helmet>
-        <title>Report - Midscene.js</title>
-      </Helmet> */}
       <div
         className="page-container"
         key={`render-${globalRenderCount}`}
@@ -227,37 +223,17 @@ export function Visualizer(props: VisualizerProps): JSX.Element {
         <div className="page-nav">
           <div className="page-nav-left">
             <Logo />
-            <div className="page-nav-toolbar">
-              <ConfigProvider
-                theme={{
-                  components: {
-                    Button: { textHoverBg: '#bfc4da80' },
-                  },
-                }}
-              >
-                <Button
-                  type="text"
-                  icon={<CaretRightOutlined />}
-                  disabled={!replayAllScripts || replayAllScripts.length === 0}
-                  style={{
-                    background: replayAllMode ? '#bfc4da80' : undefined,
-                  }}
-                  onClick={() => {
-                    setReplayAllMode(true);
-                  }}
-                >
-                  Replay All
-                </Button>
-              </ConfigProvider>
+          </div>
+          <div className="page-nav-right">
+            <div className="page-nav-version">
+              v{sdkVersion}
+              {modelName || modelDescription
+                ? ` | ${[modelName, modelDescription]
+                    .filter(Boolean)
+                    .join(', ')}`
+                : ''}
             </div>
           </div>
-          <PlaywrightCaseSelector
-            dumps={props.dumps}
-            selected={executionDump}
-            onSelect={(dump) => {
-              setGroupedDump(dump);
-            }}
-          />
         </div>
         {mainContent}
       </div>
@@ -266,43 +242,146 @@ export function Visualizer(props: VisualizerProps): JSX.Element {
   );
 }
 
-// Main App component using Visualizer
-const App = () => {
-  const dumpElements = document.querySelectorAll(
-    'script[type="midscene_web_dump"]',
-  );
-  const reportDump: ExecutionDumpWithPlaywrightAttributes[] = [];
-
-  Array.from(dumpElements)
-    .filter((el) => {
-      const textContent = el.textContent;
-      if (!textContent) {
-        console.warn('empty content in script tag', el);
-      }
-      return !!textContent;
-    })
-    .forEach((el) => {
-      const attributes: Record<string, any> = {};
-      Array.from(el.attributes).forEach((attr) => {
-        const { name, value } = attr;
-        const valueDecoded = decodeURIComponent(value);
-        if (name.startsWith('playwright_')) {
-          attributes[attr.name] = valueDecoded;
+export function App() {
+  function getDumpElements(): ExecutionDumpWithPlaywrightAttributes[] {
+    const dumpElements = document.querySelectorAll(
+      'script[type="midscene_web_dump"]',
+    );
+    const reportDump: ExecutionDumpWithPlaywrightAttributes[] = [];
+    Array.from(dumpElements)
+      .filter((el) => {
+        const textContent = el.textContent;
+        if (!textContent) {
+          console.warn('empty content in script tag', el);
+        }
+        return !!textContent;
+      })
+      .forEach((el) => {
+        const attributes: Record<string, any> = {};
+        Array.from(el.attributes).forEach((attr) => {
+          const { name, value } = attr;
+          const valueDecoded = decodeURIComponent(value);
+          if (name.startsWith('playwright_')) {
+            attributes[attr.name] = valueDecoded;
+          }
+        });
+        const content = antiEscapeScriptTag(el.textContent || '');
+        try {
+          const jsonContent = JSON.parse(content);
+          jsonContent.attributes = attributes;
+          reportDump.push(jsonContent);
+        } catch (e) {
+          console.error(el);
+          console.error('failed to parse json content', e);
         }
       });
+    return reportDump;
+  }
 
-      const content = el.textContent;
-      try {
-        const jsonContent = JSON.parse(content!);
-        jsonContent.attributes = attributes;
-        reportDump.push(jsonContent);
-      } catch (e) {
-        console.error(el);
-        console.error('failed to parse json content', e);
+  const [reportDump, setReportDump] = useState<
+    ExecutionDumpWithPlaywrightAttributes[]
+  >([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const dumpsLoadedRef = useRef(false);
+
+  const loadDumpElements = useCallback(() => {
+    const currentElements = document.querySelectorAll(
+      'script[type="midscene_web_dump"]',
+    );
+
+    // If it has been loaded and the number of elements has not changed, skip it.
+    if (
+      dumpsLoadedRef.current &&
+      currentElements.length === reportDump.length
+    ) {
+      return;
+    }
+
+    dumpsLoadedRef.current = true;
+    if (
+      currentElements.length === 1 &&
+      currentElements[0].textContent?.trim() === ''
+    ) {
+      setError('There is no dump data to display.');
+      setReportDump([]);
+      return;
+    }
+    setError(null);
+    setReportDump(getDumpElements());
+  }, [reportDump.length]);
+
+  useEffect(() => {
+    // Check if document is already loaded
+    const loadDumps = () => {
+      console.log('Loading dump elements...');
+      loadDumpElements();
+    };
+
+    // If DOM is already loaded (React mounts after DOMContentLoaded in most cases)
+    if (
+      document.readyState === 'complete' ||
+      document.readyState === 'interactive'
+    ) {
+      // Use a small timeout to ensure all scripts are parsed
+      setTimeout(loadDumps, 0);
+    } else {
+      // Wait for DOM content to be fully loaded
+      document.addEventListener('DOMContentLoaded', loadDumps);
+    }
+
+    // Set up a MutationObserver to detect if dump scripts are added after initial load
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          const addedNodes = Array.from(mutation.addedNodes);
+          const hasDumpScripts = addedNodes.some(
+            (node) =>
+              node.nodeType === Node.ELEMENT_NODE &&
+              node.nodeName === 'SCRIPT' &&
+              (node as HTMLElement).getAttribute('type') ===
+                'midscene_web_dump',
+          );
+
+          if (hasDumpScripts) {
+            loadDumps();
+            break;
+          }
+        }
       }
     });
 
-  return <Visualizer dumps={reportDump} />;
-};
+    // Start observing the document with the configured parameters
+    observer.observe(document.body, { childList: true, subtree: true });
 
-export default App;
+    // Safety fallback in case other methods fail
+    const fallbackTimer = setTimeout(loadDumps, 3000);
+
+    return () => {
+      document.removeEventListener('DOMContentLoaded', loadDumps);
+      observer.disconnect();
+      clearTimeout(fallbackTimer);
+    };
+  }, [loadDumpElements]);
+
+  if (error) {
+    return (
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          padding: '100px',
+          boxSizing: 'border-box',
+        }}
+      >
+        <Alert
+          message="Midscene.js - Error"
+          description={error}
+          type="error"
+          showIcon
+        />
+      </div>
+    );
+  }
+  return <Visualizer dumps={reportDump} />;
+}

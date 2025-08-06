@@ -19,4 +19,6 @@ export type {
   MidsceneYamlScript,
   MidsceneYamlTask,
   MidsceneYamlFlowItem,
+  MidsceneYamlFlowItemAIRightClick,
+  MidsceneYamlConfigResult,
 } from './yaml';
